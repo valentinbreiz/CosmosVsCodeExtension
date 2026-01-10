@@ -27,36 +27,14 @@ The extension will prompt to install missing tools automatically.
 | `cosmos.defaultArchitecture` | `x64` | Default target architecture |
 | `cosmos.qemuMemory` | `512M` | QEMU memory allocation |
 
-## Package Installation
-
-### Ubuntu/Debian
-```bash
-# QEMU and GDB
-sudo apt install qemu-system-x86 qemu-system-arm gdb
-
-# ARM64 UEFI firmware (optional, for ARM64 targets)
-sudo apt install qemu-efi-aarch64
-```
-
-### Fedora
-```bash
-sudo dnf install qemu-system-x86 qemu-system-aarch64 gdb edk2-aarch64
-```
-
-### Arch Linux
-```bash
-sudo pacman -S qemu-system-x86 qemu-system-aarch64 gdb edk2-aarch64
-```
+## Installation
 
 ### Cosmos Tools
 ```bash
 dotnet tool install -g Cosmos.Tools
-cosmos-tools install
 ```
 
-## Installation
-
-### From VSIX
+### Visual Studio Code Extension (VSIX)
 ```bash
 code --install-extension cosmos-vscode-1.0.0.vsix
 ```
