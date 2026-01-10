@@ -1,6 +1,6 @@
 # Cosmos OS gen3 Development for VS Code
 
-VS Code extension for creating kernel project with Cosmos OS gen3.
+VS Code extension for creating kernel projects with Cosmos OS gen3.
 
 > ⚠️ This extension currently supports **x64** targets **only**. 
 
