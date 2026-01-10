@@ -578,8 +578,7 @@ async function runCommand(arch?: string) {
     }
 
     const isoPath = path.join(outputDir, isoFiles[0]);
-    const config = vscode.workspace.getConfiguration('cosmos');
-    const memory = config.get<string>('qemuMemory') || '512M';
+    const qemuConfig = loadQemuConfig(projectDir, arch);
 
     let qemuCmd: string;
     let qemuArgs: string[];
@@ -587,20 +586,51 @@ async function runCommand(arch?: string) {
     if (arch === 'x64') {
         qemuCmd = 'qemu-system-x86_64';
         qemuArgs = [
-            '-M', 'q35', '-cpu', 'max', '-m', memory, '-serial', 'stdio',
-            '-cdrom', isoPath, '-display', 'gtk', '-vga', 'std',
+            '-M', qemuConfig.machineType,
+            '-cpu', qemuConfig.cpuModel,
+            '-m', qemuConfig.memory,
+            '-cdrom', isoPath,
+            '-display', 'gtk',
+            '-vga', 'std',
             '-no-reboot', '-no-shutdown'
         ];
+
+        if (qemuConfig.serialMode === 'stdio') {
+            qemuArgs.push('-serial', 'stdio');
+        }
+
+        if (qemuConfig.enableNetwork) {
+            const ports = qemuConfig.networkPorts.split(',').map(p => p.trim()).filter(p => p);
+            const portForwards = ports.map(p => `hostfwd=udp::${p}-:${p}`).join(',');
+            qemuArgs.push('-netdev', `user,id=net0${portForwards ? ',' + portForwards : ''}`);
+            qemuArgs.push('-device', 'e1000,netdev=net0');
+        } else {
+            qemuArgs.push('-nic', 'none');
+        }
     } else {
         qemuCmd = 'qemu-system-aarch64';
         qemuArgs = [
-            '-M', 'virt', '-cpu', 'cortex-a72', '-m', '1G',
+            '-M', qemuConfig.machineType,
+            '-cpu', qemuConfig.cpuModel,
+            '-m', qemuConfig.memory,
             '-bios', '/usr/share/AAVMF/AAVMF_CODE.fd',
             '-drive', `if=none,id=cd,file=${isoPath}`,
-            '-device', 'virtio-scsi-pci', '-device', 'scsi-cd,drive=cd,bootindex=0',
-            '-device', 'virtio-keyboard-device', '-device', 'ramfb',
-            '-display', 'gtk,show-cursor=on', '-serial', 'stdio'
+            '-device', 'virtio-scsi-pci',
+            '-device', 'scsi-cd,drive=cd,bootindex=0',
+            '-device', 'virtio-keyboard-device',
+            '-device', 'ramfb',
+            '-display', 'gtk,show-cursor=on',
+            '-nic', 'none'
         ];
+
+        if (qemuConfig.serialMode === 'stdio') {
+            qemuArgs.push('-serial', 'stdio');
+        }
+    }
+
+    // Add extra arguments if specified
+    if (qemuConfig.extraArgs) {
+        qemuArgs.push(...qemuConfig.extraArgs.split(' ').filter(a => a));
     }
 
     // Show output in the output channel
@@ -715,6 +745,7 @@ async function debugCommand(arch?: string) {
 
     const isoPath = path.join(outputDir, isoFiles[0]);
     const gdbPort = 1234;
+    const qemuConfig = loadQemuConfig(projectDir, arch);
 
     // Start QEMU with GDB server
     // -s: Start GDB server on port 1234
@@ -725,24 +756,53 @@ async function debugCommand(arch?: string) {
     if (arch === 'x64') {
         qemuCmd = 'qemu-system-x86_64';
         qemuArgs = [
-            '-M', 'q35', '-cpu', 'max', '-m', '512M',
-            '-serial', 'stdio',
-            '-cdrom', isoPath, '-display', 'gtk', '-vga', 'std',
+            '-M', qemuConfig.machineType,
+            '-cpu', qemuConfig.cpuModel,
+            '-m', qemuConfig.memory,
+            '-cdrom', isoPath,
+            '-display', 'gtk',
+            '-vga', 'std',
             '-no-reboot', '-no-shutdown',
             '-s', '-S'  // GDB server on port 1234, freeze CPU at startup
         ];
+
+        if (qemuConfig.serialMode === 'stdio') {
+            qemuArgs.push('-serial', 'stdio');
+        }
+
+        if (qemuConfig.enableNetwork) {
+            const ports = qemuConfig.networkPorts.split(',').map(p => p.trim()).filter(p => p);
+            const portForwards = ports.map(p => `hostfwd=udp::${p}-:${p}`).join(',');
+            qemuArgs.push('-netdev', `user,id=net0${portForwards ? ',' + portForwards : ''}`);
+            qemuArgs.push('-device', 'e1000,netdev=net0');
+        } else {
+            qemuArgs.push('-nic', 'none');
+        }
     } else {
         qemuCmd = 'qemu-system-aarch64';
         qemuArgs = [
-            '-M', 'virt', '-cpu', 'cortex-a72', '-m', '1G',
+            '-M', qemuConfig.machineType,
+            '-cpu', qemuConfig.cpuModel,
+            '-m', qemuConfig.memory,
             '-bios', '/usr/share/AAVMF/AAVMF_CODE.fd',
             '-drive', `if=none,id=cd,file=${isoPath}`,
-            '-device', 'virtio-scsi-pci', '-device', 'scsi-cd,drive=cd,bootindex=0',
-            '-device', 'virtio-keyboard-device', '-device', 'ramfb',
+            '-device', 'virtio-scsi-pci',
+            '-device', 'scsi-cd,drive=cd,bootindex=0',
+            '-device', 'virtio-keyboard-device',
+            '-device', 'ramfb',
             '-display', 'gtk,show-cursor=on',
-            '-serial', 'stdio',
+            '-nic', 'none',
             '-s', '-S'  // GDB server on port 1234, freeze CPU at startup
         ];
+
+        if (qemuConfig.serialMode === 'stdio') {
+            qemuArgs.push('-serial', 'stdio');
+        }
+    }
+
+    // Add extra arguments if specified
+    if (qemuConfig.extraArgs) {
+        qemuArgs.push(...qemuConfig.extraArgs.split(' ').filter(a => a));
     }
 
     // Show output in the output channel
@@ -1082,6 +1142,16 @@ function getMemoryViewerHtml(initialAddress: string): string {
 // Project Properties Panel
 // ============================================================================
 
+interface QemuConfig {
+    memory: string;
+    machineType: string;
+    cpuModel: string;
+    enableNetwork: boolean;
+    networkPorts: string;
+    serialMode: string;
+    extraArgs: string;
+}
+
 interface ProjectProperties {
     name: string;
     targetFramework: string;
@@ -1091,6 +1161,53 @@ interface ProjectProperties {
     gccFlags: string;
     defaultFont: string;
     packages: { name: string; version: string }[];
+    qemu: QemuConfig;
+}
+
+function getDefaultQemuConfig(arch: string): QemuConfig {
+    return {
+        memory: '512M',
+        machineType: arch === 'arm64' ? 'virt' : 'q35',
+        cpuModel: arch === 'arm64' ? 'cortex-a72' : 'max',
+        enableNetwork: false,
+        networkPorts: '5555',
+        serialMode: 'stdio',
+        extraArgs: ''
+    };
+}
+
+function loadQemuConfig(projectDir: string, arch: string): QemuConfig {
+    const configPath = path.join(projectDir, '.cosmos', 'config.json');
+    const defaults = getDefaultQemuConfig(arch);
+
+    try {
+        if (fs.existsSync(configPath)) {
+            const content = fs.readFileSync(configPath, 'utf8');
+            const config = JSON.parse(content);
+            return { ...defaults, ...config.qemu };
+        }
+    } catch { }
+
+    return defaults;
+}
+
+function saveQemuConfig(projectDir: string, qemu: QemuConfig): void {
+    const cosmosDir = path.join(projectDir, '.cosmos');
+    const configPath = path.join(cosmosDir, 'config.json');
+
+    if (!fs.existsSync(cosmosDir)) {
+        fs.mkdirSync(cosmosDir, { recursive: true });
+    }
+
+    let config: any = {};
+    try {
+        if (fs.existsSync(configPath)) {
+            config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+        }
+    } catch { }
+
+    config.qemu = qemu;
+    fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
 }
 
 function parseProjectProperties(csprojPath: string): ProjectProperties {
@@ -1117,15 +1234,19 @@ function parseProjectProperties(csprojPath: string): ProjectProperties {
         }
     }
 
+    const targetArch = getProperty('CosmosArch') || 'x64';
+    const projectDir = path.dirname(csprojPath);
+
     return {
         name,
         targetFramework: getProperty('TargetFramework') || 'net10.0',
-        targetArch: getProperty('CosmosArch') || 'x64',
+        targetArch,
         kernelClass: getProperty('CosmosKernelClass') || `${name}.Kernel`,
         enableGraphics: hasPackage('Cosmos.Kernel.Graphics'),
         gccFlags: getProperty('GCCCompilerFlags') || '',
         defaultFont: getProperty('CosmosDefaultFont') || '',
-        packages
+        packages,
+        qemu: loadQemuConfig(projectDir, targetArch)
     };
 }
 
@@ -1227,6 +1348,14 @@ function showProjectProperties(context: vscode.ExtensionContext) {
                         vscode.window.showErrorMessage(`Failed to save: ${error.message}`);
                     }
                     break;
+                case 'saveQemu':
+                    try {
+                        const projectDir = path.dirname(projectInfo.csproj);
+                        saveQemuConfig(projectDir, message.qemu);
+                    } catch (error: any) {
+                        vscode.window.showErrorMessage(`Failed to save QEMU config: ${error.message}`);
+                    }
+                    break;
                 case 'openCsproj':
                     vscode.workspace.openTextDocument(projectInfo.csproj).then(doc => {
                         vscode.window.showTextDocument(doc);
@@ -1296,6 +1425,32 @@ function getPropertiesWebviewContent(props: ProjectProperties, csprojPath: strin
             margin-bottom: 16px;
             padding-bottom: 8px;
             border-bottom: 1px solid var(--vscode-widget-border, rgba(128,128,128,0.2));
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            user-select: none;
+        }
+        .section-title:hover {
+            color: var(--vscode-foreground);
+        }
+        .section-title .chevron {
+            transition: transform 0.2s;
+            font-size: 10px;
+        }
+        .section.collapsed .section-title .chevron {
+            transform: rotate(-90deg);
+        }
+        .section-content {
+            overflow: hidden;
+            transition: max-height 0.3s ease, opacity 0.2s ease;
+            max-height: 1000px;
+            opacity: 1;
+        }
+        .section.collapsed .section-content {
+            max-height: 0;
+            opacity: 0;
+            margin-bottom: -16px;
         }
         .field {
             margin-bottom: 20px;
@@ -1466,9 +1621,9 @@ function getPropertiesWebviewContent(props: ProjectProperties, csprojPath: strin
             </div>
         </div>
 
-        <div class="section">
-            <div class="section-title">General</div>
-
+        <div class="section" id="section-general">
+            <div class="section-title" onclick="toggleSection('section-general')"><span>General</span><span class="chevron">▼</span></div>
+            <div class="section-content">
             <div class="field">
                 <label class="field-label">.NET Version</label>
                 <select id="targetFramework" class="field-input">
@@ -1489,11 +1644,12 @@ function getPropertiesWebviewContent(props: ProjectProperties, csprojPath: strin
                 <input type="text" id="kernelClass" class="field-input" value="${props.kernelClass}">
                 <div class="field-hint">Fully qualified class name (e.g., MyKernel.Kernel)</div>
             </div>
+            </div>
         </div>
 
-        <div class="section">
-            <div class="section-title">Features</div>
-
+        <div class="section" id="section-features">
+            <div class="section-title" onclick="toggleSection('section-features')"><span>Features</span><span class="chevron">▼</span></div>
+            <div class="section-content">
             <div class="toggle-field">
                 <div class="toggle-info">
                     <div class="toggle-label">Graphics Support</div>
@@ -1509,20 +1665,97 @@ function getPropertiesWebviewContent(props: ProjectProperties, csprojPath: strin
                 <label class="field-label">Default Font</label>
                 <input type="text" id="defaultFont" class="field-input" value="${props.defaultFont}" placeholder="Cosmos.Kernel.Graphics.Fonts.DefaultFont.psf">
             </div>
+            </div>
         </div>
 
-        <div class="section">
-            <div class="section-title">Advanced</div>
-
+        <div class="section collapsed" id="section-advanced">
+            <div class="section-title" onclick="toggleSection('section-advanced')"><span>Advanced</span><span class="chevron">▼</span></div>
+            <div class="section-content">
             <div class="field">
                 <label class="field-label">GCC Compiler Flags</label>
                 <input type="text" id="gccFlags" class="field-input" value="${props.gccFlags}" placeholder="Uses SDK defaults if empty">
             </div>
+            </div>
         </div>
 
-        <div class="section">
-            <div class="section-title">Packages</div>
+        <div class="section" id="section-qemu">
+            <div class="section-title" onclick="toggleSection('section-qemu')"><span>QEMU Configuration</span><span class="chevron">▼</span></div>
+            <div class="section-content">
 
+            <div class="field">
+                <label class="field-label">Memory</label>
+                <select id="qemuMemory" class="field-input">
+                    <option value="256M" ${props.qemu.memory === '256M' ? 'selected' : ''}>256 MB</option>
+                    <option value="512M" ${props.qemu.memory === '512M' ? 'selected' : ''}>512 MB</option>
+                    <option value="1G" ${props.qemu.memory === '1G' ? 'selected' : ''}>1 GB</option>
+                    <option value="2G" ${props.qemu.memory === '2G' ? 'selected' : ''}>2 GB</option>
+                    <option value="4G" ${props.qemu.memory === '4G' ? 'selected' : ''}>4 GB</option>
+                </select>
+            </div>
+
+            <div class="field">
+                <label class="field-label">Machine Type</label>
+                <select id="qemuMachineType" class="field-input">
+                    ${props.targetArch === 'x64' ? `
+                        <option value="q35" ${props.qemu.machineType === 'q35' ? 'selected' : ''}>Q35 (Modern chipset)</option>
+                        <option value="pc" ${props.qemu.machineType === 'pc' ? 'selected' : ''}>PC (Legacy i440FX)</option>
+                    ` : `
+                        <option value="virt" ${props.qemu.machineType === 'virt' ? 'selected' : ''}>Virt (ARM Virtual Machine)</option>
+                    `}
+                </select>
+            </div>
+
+            <div class="field">
+                <label class="field-label">CPU Model</label>
+                <select id="qemuCpuModel" class="field-input">
+                    ${props.targetArch === 'x64' ? `
+                        <option value="max" ${props.qemu.cpuModel === 'max' ? 'selected' : ''}>Max (All features)</option>
+                        <option value="qemu64" ${props.qemu.cpuModel === 'qemu64' ? 'selected' : ''}>QEMU64 (Basic)</option>
+                        <option value="host" ${props.qemu.cpuModel === 'host' ? 'selected' : ''}>Host (Pass-through)</option>
+                    ` : `
+                        <option value="cortex-a72" ${props.qemu.cpuModel === 'cortex-a72' ? 'selected' : ''}>Cortex-A72</option>
+                        <option value="cortex-a53" ${props.qemu.cpuModel === 'cortex-a53' ? 'selected' : ''}>Cortex-A53</option>
+                        <option value="max" ${props.qemu.cpuModel === 'max' ? 'selected' : ''}>Max (All features)</option>
+                    `}
+                </select>
+            </div>
+
+            <div class="field">
+                <label class="field-label">Serial Output</label>
+                <select id="qemuSerialMode" class="field-input">
+                    <option value="stdio" ${props.qemu.serialMode === 'stdio' ? 'selected' : ''}>Standard I/O (Output panel)</option>
+                    <option value="none" ${props.qemu.serialMode === 'none' ? 'selected' : ''}>Disabled</option>
+                </select>
+            </div>
+
+            <div class="toggle-field">
+                <div class="toggle-info">
+                    <div class="toggle-label">Network Support</div>
+                    <div class="toggle-hint">Enable E1000 network card with user-mode networking</div>
+                </div>
+                <label class="toggle-switch">
+                    <input type="checkbox" id="qemuEnableNetwork" ${props.qemu.enableNetwork ? 'checked' : ''}>
+                    <span class="toggle-slider"></span>
+                </label>
+            </div>
+
+            <div class="field" id="networkPortsField" style="margin-top: 16px; ${props.qemu.enableNetwork ? '' : 'display: none;'}">
+                <label class="field-label">Port Forwards (UDP)</label>
+                <input type="text" id="qemuNetworkPorts" class="field-input" value="${props.qemu.networkPorts}" placeholder="5555,5556">
+                <div class="field-hint">Comma-separated ports forwarded from host to guest</div>
+            </div>
+
+            <div class="field" style="margin-top: 16px;">
+                <label class="field-label">Extra Arguments</label>
+                <input type="text" id="qemuExtraArgs" class="field-input" value="${props.qemu.extraArgs}" placeholder="-device ich9-ahci">
+                <div class="field-hint">Additional QEMU command line arguments</div>
+            </div>
+            </div>
+        </div>
+
+        <div class="section collapsed" id="section-packages">
+            <div class="section-title" onclick="toggleSection('section-packages')"><span>Packages</span><span class="chevron">▼</span></div>
+            <div class="section-content">
             <div class="packages">
                 ${props.packages.length > 0 ? props.packages.map(p => `
                     <div class="package">
@@ -1531,13 +1764,20 @@ function getPropertiesWebviewContent(props: ProjectProperties, csprojPath: strin
                     </div>
                 `).join('') : '<div class="empty-packages">No additional packages</div>'}
             </div>
+            </div>
         </div>
 
     </div>
 
     <script>
+        function toggleSection(id) {
+            const section = document.getElementById(id);
+            section.classList.toggle('collapsed');
+        }
+
         const vscode = acquireVsCodeApi();
         let saveTimeout;
+        let qemuSaveTimeout;
 
         function save() {
             const properties = {
@@ -1549,6 +1789,20 @@ function getPropertiesWebviewContent(props: ProjectProperties, csprojPath: strin
                 defaultFont: document.getElementById('defaultFont').value
             };
             vscode.postMessage({ command: 'save', properties });
+            showSaveStatus('Saved');
+        }
+
+        function saveQemu() {
+            const qemu = {
+                memory: document.getElementById('qemuMemory').value,
+                machineType: document.getElementById('qemuMachineType').value,
+                cpuModel: document.getElementById('qemuCpuModel').value,
+                serialMode: document.getElementById('qemuSerialMode').value,
+                enableNetwork: document.getElementById('qemuEnableNetwork').checked,
+                networkPorts: document.getElementById('qemuNetworkPorts').value,
+                extraArgs: document.getElementById('qemuExtraArgs').value
+            };
+            vscode.postMessage({ command: 'saveQemu', qemu });
             showSaveStatus('Saved');
         }
 
@@ -1564,6 +1818,11 @@ function getPropertiesWebviewContent(props: ProjectProperties, csprojPath: strin
             saveTimeout = setTimeout(save, 300);
         }
 
+        function onQemuInputChange() {
+            clearTimeout(qemuSaveTimeout);
+            qemuSaveTimeout = setTimeout(saveQemu, 300);
+        }
+
         // Auto-save on any input change
         document.getElementById('targetFramework').addEventListener('change', save);
         document.getElementById('targetArch').addEventListener('change', save);
@@ -1571,6 +1830,19 @@ function getPropertiesWebviewContent(props: ProjectProperties, csprojPath: strin
         document.getElementById('enableGraphics').addEventListener('change', save);
         document.getElementById('gccFlags').addEventListener('input', onInputChange);
         document.getElementById('defaultFont').addEventListener('input', onInputChange);
+
+        // QEMU config auto-save
+        document.getElementById('qemuMemory').addEventListener('change', saveQemu);
+        document.getElementById('qemuMachineType').addEventListener('change', saveQemu);
+        document.getElementById('qemuCpuModel').addEventListener('change', saveQemu);
+        document.getElementById('qemuSerialMode').addEventListener('change', saveQemu);
+        document.getElementById('qemuEnableNetwork').addEventListener('change', function() {
+            const portsField = document.getElementById('networkPortsField');
+            portsField.style.display = this.checked ? 'block' : 'none';
+            saveQemu();
+        });
+        document.getElementById('qemuNetworkPorts').addEventListener('input', onQemuInputChange);
+        document.getElementById('qemuExtraArgs').addEventListener('input', onQemuInputChange);
 
         function openCsproj() {
             vscode.postMessage({ command: 'openCsproj' });
