@@ -27,6 +27,10 @@ The extension will prompt to install missing tools automatically.
 dotnet tool install -g Cosmos.Tools
 ```
 
+```bash
+dotnet tool install -g Cosmos.Patcher
+```
+
 ### Visual Studio Code Extension (VSIX)
 ```bash
 code --install-extension cosmos-vscode-1.0.0.vsix
