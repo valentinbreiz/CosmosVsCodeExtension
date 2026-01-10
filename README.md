@@ -20,13 +20,6 @@ VS Code extension for creating kernel projects with Cosmos OS gen3.
 
 The extension will prompt to install missing tools automatically.
 
-## Configuration
-
-| Setting | Default | Description |
-|---------|---------|-------------|
-| `cosmos.defaultArchitecture` | `x64` | Default target architecture |
-| `cosmos.qemuMemory` | `512M` | QEMU memory allocation |
-
 ## Installation
 
 ### Cosmos Tools
