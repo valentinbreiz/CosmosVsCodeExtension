@@ -120,12 +120,6 @@
         "title": "Project Properties",
         "icon": "$(settings-gear)",
         "category": "Cosmos"
-      },
-      {
-        "command": "cosmos.viewMemory",
-        "title": "View Memory",
-        "icon": "$(file-binary)",
-        "category": "Cosmos"
       }
     ],
     "menus": {
