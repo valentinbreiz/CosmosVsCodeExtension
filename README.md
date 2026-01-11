@@ -14,7 +14,7 @@ VS Code extension for creating kernel projects with Cosmos OS gen3.
 ## Requirements
 
 - [.NET 10 SDK](https://dotnet.microsoft.com/download)
-- [cosmos-tools](https://www.nuget.org/packages/Cosmos.Tools) CLI
+- [cosmos](https://www.nuget.org/packages/Cosmos.Tools) CLI
 - QEMU (for running/debugging)
 - GDB (for debugging)
 

@@ -22,15 +22,89 @@ function getEnvWithDotnetTools(): NodeJS.ProcessEnv {
 
 function execWithPath(command: string, options: { encoding: 'utf8'; timeout?: number; cwd?: string } = { encoding: 'utf8' }): string {
     try {
+        // Use platform-appropriate shell
+        const shell = process.platform === 'win32' ? 'cmd.exe' : '/bin/sh';
         return execSync(command, {
             ...options,
             env: getEnvWithDotnetTools(),
-            shell: '/bin/bash'
+            shell: shell
         });
     } catch (e) {
         throw e;
     }
 }
+
+// Cross-platform cosmos executable detection
+function getCosmosToolsPath(): string | null {
+    const home = os.homedir();
+    const toolsDir = path.join(home, '.dotnet', 'tools');
+
+    // Check for different executable names based on platform
+    const executableNames = process.platform === 'win32'
+        ? ['cosmos.exe', 'cosmos']
+        : ['cosmos'];
+
+    for (const name of executableNames) {
+        const fullPath = path.join(toolsDir, name);
+        if (fs.existsSync(fullPath)) {
+            return fullPath;
+        }
+    }
+    return null;
+}
+
+function isCosmosToolsInstalled(): boolean {
+    return getCosmosToolsPath() !== null;
+}
+
+// Platform info from cosmos
+interface PlatformInfo {
+    platform: string;
+    platformName: string;
+    arch: string;
+    packageManager: string;
+    qemuDisplay: string;
+    gdbCommand: string;
+    arm64UefiBios: string | null;
+    cosmosToolsPath: string | null;
+}
+
+let cachedPlatformInfo: PlatformInfo | null = null;
+
+function getPlatformInfo(): PlatformInfo {
+    if (cachedPlatformInfo) {
+        return cachedPlatformInfo;
+    }
+
+    // Try to get from cosmos
+    if (isCosmosToolsInstalled()) {
+        try {
+            const result = execWithPath('cosmos info --json', { encoding: 'utf8', timeout: 5000 });
+            cachedPlatformInfo = JSON.parse(result);
+            return cachedPlatformInfo!;
+        } catch {
+            // Fall through to defaults
+        }
+    }
+
+    // Fallback defaults based on Node.js process.platform
+    const isWindows = process.platform === 'win32';
+    const isMac = process.platform === 'darwin';
+
+    cachedPlatformInfo = {
+        platform: isWindows ? 'windows' : isMac ? 'macos' : 'linux',
+        platformName: isWindows ? 'Windows' : isMac ? 'macOS' : 'Linux',
+        arch: process.arch === 'arm64' ? 'arm64' : 'x64',
+        packageManager: isWindows ? 'choco' : isMac ? 'brew' : 'apt',
+        qemuDisplay: isWindows ? 'sdl' : isMac ? 'cocoa' : 'gtk',
+        gdbCommand: 'gdb',
+        arm64UefiBios: null,
+        cosmosToolsPath: null
+    };
+
+    return cachedPlatformInfo;
+}
+
 let projectTreeProvider: ProjectTreeProvider;
 let toolsTreeProvider: ToolsTreeProvider;
 
@@ -222,26 +296,40 @@ class ToolsTreeProvider implements vscode.TreeDataProvider<ToolItem> {
     private checkTools() {
         this.tools = [];
 
-        // Check dotnet
-        this.tools.push(this.checkCommand('dotnet', 'dotnet --version', '.NET SDK'));
-
-        // Check cosmos-tools (check file directly)
-        const home = os.homedir();
-        const cosmosToolsPath = path.join(home, '.dotnet', 'tools', 'cosmos-tools');
-        if (fs.existsSync(cosmosToolsPath)) {
-            this.tools.push(new ToolItem('Cosmos Tools', true, 'Installed'));
-        } else {
-            this.tools.push(new ToolItem('Cosmos Tools', false, 'Not installed'));
+        // First check if cosmos is installed
+        if (!isCosmosToolsInstalled()) {
+            // Fallback to basic checks if cosmos not installed
+            this.tools.push(this.checkCommand('dotnet', 'dotnet --version', '.NET SDK'));
+            this.tools.push(new ToolItem('Cosmos Tools', false, 'Not installed - run: dotnet tool install -g Cosmos.Tools'));
+            return;
         }
 
-        // Check QEMU x64
-        this.tools.push(this.checkCommand('qemu-system-x86_64', 'qemu-system-x86_64 --version', 'QEMU x64'));
+        // Use cosmos check --json for cross-platform detection
+        try {
+            const result = execWithPath('cosmos check --json', { encoding: 'utf8', timeout: 10000 });
+            const data = JSON.parse(result);
 
-        // Check QEMU ARM64
-        this.tools.push(this.checkCommand('qemu-system-aarch64', 'qemu-system-aarch64 --version', 'QEMU ARM64'));
+            // Add cosmos itself as installed
+            this.tools.push(new ToolItem('Cosmos Tools', true, 'Installed'));
 
-        // Check GDB
-        this.tools.push(this.checkCommand('gdb', 'gdb --version', 'GDB Debugger'));
+            // Parse tool results from JSON
+            if (data.tools && Array.isArray(data.tools)) {
+                for (const tool of data.tools) {
+                    this.tools.push(new ToolItem(
+                        tool.displayName,
+                        tool.found,
+                        tool.found ? (tool.version || 'Installed') : 'Not installed'
+                    ));
+                }
+            }
+        } catch (e) {
+            // If cosmos check fails, fall back to basic checks
+            this.tools.push(new ToolItem('Cosmos Tools', true, 'Installed (check failed)'));
+            this.tools.push(this.checkCommand('dotnet', 'dotnet --version', '.NET SDK'));
+            this.tools.push(this.checkCommand('qemu-system-x86_64', 'qemu-system-x86_64 --version', 'QEMU x64'));
+            this.tools.push(this.checkCommand('qemu-system-aarch64', 'qemu-system-aarch64 --version', 'QEMU ARM64'));
+            this.tools.push(this.checkCommand('gdb', 'gdb --version', 'GDB Debugger'));
+        }
     }
 
     private checkCommand(name: string, command: string, displayName: string): ToolItem {
@@ -271,12 +359,8 @@ class ToolItem extends vscode.TreeItem {
 // ============================================================================
 
 async function newProjectCommand(context: vscode.ExtensionContext) {
-    // Check if cosmos-tools is installed (check file directly)
-    const home = os.homedir();
-    const cosmosToolsPath = path.join(home, '.dotnet', 'tools', 'cosmos-tools');
-    const cosmosToolsInstalled = fs.existsSync(cosmosToolsPath);
-
-    if (!cosmosToolsInstalled) {
+    // Check if cosmos is installed (cross-platform detection)
+    if (!isCosmosToolsInstalled()) {
         const install = await vscode.window.showWarningMessage(
             'Cosmos Tools is required to create projects. Install now?',
             'Install', 'Cancel'
@@ -285,7 +369,7 @@ async function newProjectCommand(context: vscode.ExtensionContext) {
 
         const terminal = vscode.window.createTerminal('Cosmos Setup');
         terminal.show();
-        terminal.sendText('dotnet tool install -g Cosmos.Tools && cosmos-tools install');
+        terminal.sendText('dotnet tool install -g Cosmos.Tools && cosmos install');
 
         await vscode.window.showInformationMessage(
             'Installing Cosmos Tools. Please run "Create Kernel Project" again after installation completes.',
@@ -432,7 +516,7 @@ async function checkToolsCommand() {
     buildChannel.appendLine('');
 
     try {
-        const result = execWithPath('cosmos-tools check', { encoding: 'utf8' });
+        const result = execWithPath('cosmos check', { encoding: 'utf8' });
         buildChannel.appendLine(result);
     } catch (error: any) {
         if (error.stdout) {
@@ -452,7 +536,7 @@ async function checkToolsCommand() {
 async function installToolsCommand() {
     const terminal = vscode.window.createTerminal('Cosmos Tools');
     terminal.show();
-    terminal.sendText('cosmos-tools install');
+    terminal.sendText('cosmos install');
 }
 
 async function buildCommand(arch?: string) {
@@ -485,7 +569,6 @@ async function buildCommand(arch?: string) {
     }
 
     const projectDir = path.dirname(projectInfo.csproj);
-    const archUpper = arch.toUpperCase();
 
     // Show output in the build channel
     buildChannel.show(true);
@@ -493,20 +576,19 @@ async function buildCommand(arch?: string) {
     buildChannel.appendLine(`Building ${projectInfo.name} for ${arch} (${config.label})...`);
     buildChannel.appendLine('');
 
+    // Use cosmos build for cross-platform support
     const buildArgs = [
-        'publish',
+        'build',
+        '-p', projectDir,
+        '-a', arch,
         '-c', config.label,
-        '-r', `linux-${arch}`,
-        `-p:DefineConstants=ARCH_${archUpper}`,
-        `-p:CosmosArch=${arch}`,
-        '-o', `./output-${arch}`,
-        '--verbosity', 'minimal'
+        '-v'  // Verbose for output channel
     ];
 
-    buildChannel.appendLine(`> dotnet ${buildArgs.join(' ')}`);
+    buildChannel.appendLine(`> cosmos ${buildArgs.join(' ')}`);
     buildChannel.appendLine('');
 
-    const buildProcess = spawn('dotnet', buildArgs, {
+    const buildProcess = spawn('cosmos', buildArgs, {
         cwd: projectDir,
         env: getEnvWithDotnetTools(),
         shell: true
@@ -578,6 +660,7 @@ async function runCommand(arch?: string) {
 
     const isoPath = path.join(outputDir, isoFiles[0]);
     const qemuConfig = loadQemuConfig(projectDir, arch);
+    const platformInfo = getPlatformInfo();
 
     let qemuCmd: string;
     let qemuArgs: string[];
@@ -589,7 +672,7 @@ async function runCommand(arch?: string) {
             '-cpu', qemuConfig.cpuModel,
             '-m', qemuConfig.memory,
             '-cdrom', isoPath,
-            '-display', 'gtk',
+            '-display', platformInfo.qemuDisplay,
             '-vga', 'std',
             '-no-reboot', '-no-shutdown'
         ];
@@ -611,16 +694,26 @@ async function runCommand(arch?: string) {
         qemuArgs = [
             '-M', qemuConfig.machineType,
             '-cpu', qemuConfig.cpuModel,
-            '-m', qemuConfig.memory,
-            '-bios', '/usr/share/AAVMF/AAVMF_CODE.fd',
+            '-m', qemuConfig.memory
+        ];
+
+        // Use platform-detected UEFI BIOS path
+        const biosPath = platformInfo.arm64UefiBios;
+        if (biosPath) {
+            qemuArgs.push('-bios', biosPath);
+        } else {
+            vscode.window.showWarningMessage('ARM64 UEFI BIOS not found. QEMU may fail to boot.');
+        }
+
+        qemuArgs.push(
             '-drive', `if=none,id=cd,file=${isoPath}`,
             '-device', 'virtio-scsi-pci',
             '-device', 'scsi-cd,drive=cd,bootindex=0',
             '-device', 'virtio-keyboard-device',
             '-device', 'ramfb',
-            '-display', 'gtk,show-cursor=on',
+            '-display', `${platformInfo.qemuDisplay},show-cursor=on`,
             '-nic', 'none'
-        ];
+        );
 
         if (qemuConfig.serialMode === 'stdio') {
             qemuArgs.push('-serial', 'stdio');
@@ -636,6 +729,7 @@ async function runCommand(arch?: string) {
     outputChannel.show(true);
     outputChannel.clear();
     outputChannel.appendLine(`Running ${projectInfo.name} (${arch}) in QEMU...`);
+    outputChannel.appendLine(`Platform: ${platformInfo.platformName}`);
     outputChannel.appendLine('');
     outputChannel.appendLine(`> ${qemuCmd} ${qemuArgs.join(' ')}`);
     outputChannel.appendLine('');
@@ -745,6 +839,7 @@ async function debugCommand(arch?: string) {
     const isoPath = path.join(outputDir, isoFiles[0]);
     const gdbPort = 1234;
     const qemuConfig = loadQemuConfig(projectDir, arch);
+    const platformInfo = getPlatformInfo();
 
     // Start QEMU with GDB server
     // -s: Start GDB server on port 1234
@@ -759,7 +854,7 @@ async function debugCommand(arch?: string) {
             '-cpu', qemuConfig.cpuModel,
             '-m', qemuConfig.memory,
             '-cdrom', isoPath,
-            '-display', 'gtk',
+            '-display', platformInfo.qemuDisplay,
             '-vga', 'std',
             '-no-reboot', '-no-shutdown',
             '-s', '-S'  // GDB server on port 1234, freeze CPU at startup
@@ -782,17 +877,27 @@ async function debugCommand(arch?: string) {
         qemuArgs = [
             '-M', qemuConfig.machineType,
             '-cpu', qemuConfig.cpuModel,
-            '-m', qemuConfig.memory,
-            '-bios', '/usr/share/AAVMF/AAVMF_CODE.fd',
+            '-m', qemuConfig.memory
+        ];
+
+        // Use platform-detected UEFI BIOS path
+        const biosPath = platformInfo.arm64UefiBios;
+        if (biosPath) {
+            qemuArgs.push('-bios', biosPath);
+        } else {
+            vscode.window.showWarningMessage('ARM64 UEFI BIOS not found. QEMU may fail to boot.');
+        }
+
+        qemuArgs.push(
             '-drive', `if=none,id=cd,file=${isoPath}`,
             '-device', 'virtio-scsi-pci',
             '-device', 'scsi-cd,drive=cd,bootindex=0',
             '-device', 'virtio-keyboard-device',
             '-device', 'ramfb',
-            '-display', 'gtk,show-cursor=on',
+            '-display', `${platformInfo.qemuDisplay},show-cursor=on`,
             '-nic', 'none',
             '-s', '-S'  // GDB server on port 1234, freeze CPU at startup
-        ];
+        );
 
         if (qemuConfig.serialMode === 'stdio') {
             qemuArgs.push('-serial', 'stdio');
@@ -842,7 +947,8 @@ async function debugCommand(arch?: string) {
     await new Promise(resolve => setTimeout(resolve, 1500));
 
     // Create GDB debug configuration using cppdbg
-    const gdbPath = arch === 'x64' ? 'gdb' : 'gdb-multiarch';
+    // Use platform-detected GDB command
+    const gdbPath = platformInfo.gdbCommand;
     const debugConfig: vscode.DebugConfiguration = {
         name: `Debug ${arch} Kernel`,
         type: 'cppdbg',
