@@ -202,10 +202,23 @@ function getProjectInfo(): { name: string; arch: string; csproj: string } | null
             try {
                 const content = fs.readFileSync(csproj, 'utf8');
                 if (content.includes('Cosmos.Sdk') || content.includes('Cosmos.Kernel')) {
-                    const archMatch = content.match(/<CosmosArch>(\w+)<\/CosmosArch>/);
+                    const projectDir = path.dirname(csproj);
+
+                    // Read architecture from .cosmos/config.json
+                    let arch = 'x64';
+                    const configPath = path.join(projectDir, '.cosmos', 'config.json');
+                    if (fs.existsSync(configPath)) {
+                        try {
+                            const config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+                            if (config.targetArch) {
+                                arch = config.targetArch;
+                            }
+                        } catch { }
+                    }
+
                     return {
                         name: path.basename(csproj, '.csproj'),
-                        arch: archMatch ? archMatch[1] : 'x64',
+                        arch: arch,
                         csproj: csproj
                     };
                 }
@@ -478,7 +491,7 @@ async function newProjectCommand(context: vscode.ExtensionContext) {
 
         // Run dotnet new (use -o . when creating in current dir to avoid subdirectory)
         const outputFlag = createInCurrentDir ? '-o .' : '';
-        const cmd = `dotnet new cosmos-kernel -n ${projectName} --TargetArch ${arch.label} ${outputFlag} --force`;
+        const cmd = `dotnet new cosmos-kernel -n ${projectName} ${outputFlag} --force`;
         buildChannel.appendLine(`> ${cmd}`);
 
         const result = execWithPath(cmd, {
@@ -486,8 +499,18 @@ async function newProjectCommand(context: vscode.ExtensionContext) {
             encoding: 'utf8'
         });
         buildChannel.appendLine(result);
+
+        // Save selected architecture to .cosmos/config.json
+        const cosmosDir = path.join(projectPath, '.cosmos');
+        if (!fs.existsSync(cosmosDir)) {
+            fs.mkdirSync(cosmosDir, { recursive: true });
+        }
+        const configPath = path.join(cosmosDir, 'config.json');
+        const config = { targetArch: arch.label, qemu: getDefaultQemuConfig(arch.label) };
+        fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
+
         buildChannel.appendLine('');
-        buildChannel.appendLine('Project created successfully!');
+        buildChannel.appendLine(`Project created successfully! (Target: ${arch.label})`);
 
         // Open the project automatically
         if (createInCurrentDir) {
@@ -540,16 +563,16 @@ async function installToolsCommand() {
 }
 
 async function buildCommand(arch?: string) {
+    // Get project info first to use configured architecture as default
+    const projectInfo = getProjectInfo();
+    if (!projectInfo) {
+        vscode.window.showErrorMessage('No Cosmos project found');
+        return;
+    }
+
     if (!arch) {
-        const selected = await vscode.window.showQuickPick(
-            [
-                { label: 'x64', description: 'Intel/AMD 64-bit' },
-                { label: 'arm64', description: 'ARM 64-bit' }
-            ],
-            { placeHolder: 'Select target architecture' }
-        );
-        if (!selected) return;
-        arch = selected.label;
+        // Use project's configured architecture as default
+        arch = projectInfo.arch;
     }
 
     const config = await vscode.window.showQuickPick(
@@ -561,12 +584,6 @@ async function buildCommand(arch?: string) {
     );
 
     if (!config) return;
-
-    const projectInfo = getProjectInfo();
-    if (!projectInfo) {
-        vscode.window.showErrorMessage('No Cosmos project found');
-        return;
-    }
 
     const projectDir = path.dirname(projectInfo.csproj);
 
@@ -620,22 +637,15 @@ async function buildCommand(arch?: string) {
 }
 
 async function runCommand(arch?: string) {
-    if (!arch) {
-        const selected = await vscode.window.showQuickPick(
-            [
-                { label: 'x64', description: 'Run x64 kernel in QEMU' },
-                { label: 'arm64', description: 'Run ARM64 kernel in QEMU' }
-            ],
-            { placeHolder: 'Select architecture to run' }
-        );
-        if (!selected) return;
-        arch = selected.label;
-    }
-
     const projectInfo = getProjectInfo();
     if (!projectInfo) {
         vscode.window.showErrorMessage('No Cosmos project found');
         return;
+    }
+
+    if (!arch) {
+        // Use project's configured architecture as default
+        arch = projectInfo.arch;
     }
 
     const projectDir = path.dirname(projectInfo.csproj);
@@ -760,18 +770,6 @@ async function runCommand(arch?: string) {
 }
 
 async function debugCommand(arch?: string) {
-    if (!arch) {
-        const selected = await vscode.window.showQuickPick(
-            [
-                { label: 'x64', description: 'Debug x64 kernel' },
-                { label: 'arm64', description: 'Debug ARM64 kernel' }
-            ],
-            { placeHolder: 'Select architecture to debug' }
-        );
-        if (!selected) return;
-        arch = selected.label;
-    }
-
     const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
     if (!workspaceFolder) {
         vscode.window.showErrorMessage('No workspace folder open');
@@ -782,6 +780,11 @@ async function debugCommand(arch?: string) {
     if (!projectInfo) {
         vscode.window.showErrorMessage('No Cosmos project found');
         return;
+    }
+
+    if (!arch) {
+        // Use project's configured architecture as default
+        arch = projectInfo.arch;
     }
 
     const projectDir = path.dirname(projectInfo.csproj);
@@ -1050,11 +1053,38 @@ function loadQemuConfig(projectDir: string, arch: string): QemuConfig {
     const configPath = path.join(projectDir, '.cosmos', 'config.json');
     const defaults = getDefaultQemuConfig(arch);
 
+    // Machine types valid for each architecture
+    const x64MachineTypes = ['q35', 'pc'];
+    const arm64MachineTypes = ['virt'];
+
+    // CPU models valid for each architecture
+    const x64CpuModels = ['max', 'qemu64', 'host'];
+    const arm64CpuModels = ['cortex-a72', 'cortex-a53', 'max'];
+
     try {
         if (fs.existsSync(configPath)) {
             const content = fs.readFileSync(configPath, 'utf8');
             const config = JSON.parse(content);
-            return { ...defaults, ...config.qemu };
+            const merged = { ...defaults, ...config.qemu };
+
+            // Validate machine type matches architecture
+            if (arch === 'arm64') {
+                if (!arm64MachineTypes.includes(merged.machineType)) {
+                    merged.machineType = defaults.machineType;
+                }
+                if (!arm64CpuModels.includes(merged.cpuModel)) {
+                    merged.cpuModel = defaults.cpuModel;
+                }
+            } else {
+                if (!x64MachineTypes.includes(merged.machineType)) {
+                    merged.machineType = defaults.machineType;
+                }
+                if (!x64CpuModels.includes(merged.cpuModel)) {
+                    merged.cpuModel = defaults.cpuModel;
+                }
+            }
+
+            return merged;
         }
     } catch { }
 
@@ -1083,6 +1113,7 @@ function saveQemuConfig(projectDir: string, qemu: QemuConfig): void {
 function parseProjectProperties(csprojPath: string): ProjectProperties {
     const content = fs.readFileSync(csprojPath, 'utf8');
     const name = path.basename(csprojPath, '.csproj');
+    const projectDir = path.dirname(csprojPath);
 
     // Parse properties using regex
     const getProperty = (prop: string): string => {
@@ -1104,8 +1135,17 @@ function parseProjectProperties(csprojPath: string): ProjectProperties {
         }
     }
 
-    const targetArch = getProperty('CosmosArch') || 'x64';
-    const projectDir = path.dirname(csprojPath);
+    // Read architecture from .cosmos/config.json
+    let targetArch = 'x64';
+    const configPath = path.join(projectDir, '.cosmos', 'config.json');
+    if (fs.existsSync(configPath)) {
+        try {
+            const config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+            if (config.targetArch) {
+                targetArch = config.targetArch;
+            }
+        } catch { }
+    }
 
     return {
         name,
@@ -1147,7 +1187,22 @@ function saveProjectProperties(csprojPath: string, props: ProjectProperties): vo
 
     // Update properties (always update, even if empty to remove them)
     setProperty('TargetFramework', props.targetFramework || 'net10.0');
-    setProperty('CosmosArch', props.targetArch || 'x64');
+
+    // Save targetArch to .cosmos/config.json
+    const projectDir = path.dirname(csprojPath);
+    const cosmosDir = path.join(projectDir, '.cosmos');
+    if (!fs.existsSync(cosmosDir)) {
+        fs.mkdirSync(cosmosDir, { recursive: true });
+    }
+    const configPath = path.join(cosmosDir, 'config.json');
+    let config: any = {};
+    try {
+        if (fs.existsSync(configPath)) {
+            config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+        }
+    } catch { }
+    config.targetArch = props.targetArch || 'x64';
+    fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
 
     if (props.kernelClass) {
         setProperty('CosmosKernelClass', props.kernelClass);
