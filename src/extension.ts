@@ -611,12 +611,15 @@ async function buildCommand(arch?: string) {
         shell: true
     });
 
+    // Strip ANSI escape codes for clean output in VS Code
+    const stripAnsi = (str: string) => str.replace(/\x1b\[[0-9;]*m/g, '');
+
     buildProcess.stdout?.on('data', (data: Buffer) => {
-        buildChannel.append(data.toString());
+        buildChannel.append(stripAnsi(data.toString()));
     });
 
     buildProcess.stderr?.on('data', (data: Buffer) => {
-        buildChannel.append(data.toString());
+        buildChannel.append(stripAnsi(data.toString()));
     });
 
     buildProcess.on('close', (code) => {
