@@ -510,6 +510,39 @@ async function newProjectCommand(context: vscode.ExtensionContext) {
         fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
 
         buildChannel.appendLine('');
+        buildChannel.appendLine('  -hrr-                                       ___');
+        buildChannel.appendLine('                                          ,o88888');
+        buildChannel.appendLine("                                       ,o8888888'");
+        buildChannel.appendLine('                 ,:o:o:oooo.        ,8O88Pd8888"');
+        buildChannel.appendLine('             ,.::.::o:ooooOoOoO. ,oO8O8Pd888\'"');
+        buildChannel.appendLine('           ,.:.::o:ooOoOoOO8O8OOo.8OOPd8O8O"');
+        buildChannel.appendLine('          , ..:.::o:ooOoOOOO8OOOOo.FdO8O8"');
+        buildChannel.appendLine('         , ..:.::o:ooOoOO8O888O8O,COCOO"');
+        buildChannel.appendLine('        , . ..:.::o:ooOoOOOO8OOOOCOCO"');
+        buildChannel.appendLine('         . ..:.::o:ooOoOoOO8O8OCCCC"o');
+        buildChannel.appendLine('            . ..:.::o:ooooOoCoCCC"o:o');
+        buildChannel.appendLine('            . ..:.::o:o:,cooooCo"oo:o:');
+        buildChannel.appendLine("         `   . . ..:.:cocoooo\"'o:o:::'");
+        buildChannel.appendLine("         .`   . ..::ccccoc\"'o:o:o:::'");
+        buildChannel.appendLine("        :.:.    ,c:cccc\"':.:.:.:.:.'");
+        buildChannel.appendLine("      ..:.:\"\\'`::::c:\"'..:.:.:.:.:.'");
+        buildChannel.appendLine("    ...:.'.:.::::\"'    . . . . .'");
+        buildChannel.appendLine("   .. . ....:.\"' `   .  . . ''");
+        buildChannel.appendLine(" . . . ....\"'");
+        buildChannel.appendLine(" .. . .\"'");
+        buildChannel.appendLine('.');
+        // Get Cosmos.Kernel version from csproj
+        let cosmosVersion = '';
+        const csprojPath = path.join(projectPath, `${projectName}.csproj`);
+        if (fs.existsSync(csprojPath)) {
+            const csprojContent = fs.readFileSync(csprojPath, 'utf8');
+            const versionMatch = csprojContent.match(/<PackageReference\s+Include="Cosmos\.Kernel"\s+Version="([^"]+)"/);
+            if (versionMatch) {
+                cosmosVersion = versionMatch[1];
+            }
+        }
+        buildChannel.appendLine('         Cosmos gen3 v' + cosmosVersion);
+        buildChannel.appendLine('');
         buildChannel.appendLine(`Project created successfully! (Target: ${arch.label})`);
 
         // Open the project automatically
