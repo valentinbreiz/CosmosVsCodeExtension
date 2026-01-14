@@ -2,7 +2,7 @@
   "name": "cosmos-vscode",
   "displayName": "Cosmos OS Development",
   "description": "VS Code extension for Cosmos OS kernel development with NativeAOT",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "publisher": "cosmosos",
   "repository": {
     "type": "git",
