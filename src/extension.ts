@@ -1728,9 +1728,8 @@ function getPropertiesWebviewContent(props: ProjectProperties, csprojPath: strin
             </div>
         </div>
 
-        <div class="section collapsed" id="section-packages">
-            <div class="section-title" onclick="toggleSection('section-packages')"><span>Packages</span><span class="chevron">▼</span></div>
-            <div class="section-content">
+        <div class="section" id="section-packages">
+            <div class="section-title"><span>Packages</span></div>
             <div class="packages">
                 ${props.packages.length > 0 ? props.packages.map(p => `
                     <div class="package">
@@ -1738,7 +1737,6 @@ function getPropertiesWebviewContent(props: ProjectProperties, csprojPath: strin
                         <span class="package-version">${p.version}</span>
                     </div>
                 `).join('') : '<div class="empty-packages">No additional packages</div>'}
-            </div>
             </div>
         </div>
 
