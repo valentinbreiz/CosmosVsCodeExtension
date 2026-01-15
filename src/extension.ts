@@ -1066,9 +1066,10 @@ interface ProjectProperties {
     targetFramework: string;
     targetArch: string;
     kernelClass: string;
-    enableGraphics: boolean;
+    enableKeyboard: boolean;
+    enableNetwork: boolean;
+    enableScheduler: boolean;
     gccFlags: string;
-    defaultFont: string;
     packages: { name: string; version: string }[];
     qemu: QemuConfig;
 }
@@ -1188,9 +1189,10 @@ function parseProjectProperties(csprojPath: string): ProjectProperties {
         targetFramework: getProperty('TargetFramework') || 'net10.0',
         targetArch,
         kernelClass: getProperty('CosmosKernelClass') || `${name}.Kernel`,
-        enableGraphics: hasPackage('Cosmos.Kernel.Graphics'),
+        enableKeyboard: getProperty('CosmosEnableKeyboard') !== 'false',
+        enableNetwork: getProperty('CosmosEnableNetwork') !== 'false',
+        enableScheduler: getProperty('CosmosEnableScheduler') !== 'false',
         gccFlags: getProperty('GCCCompilerFlags') || '',
-        defaultFont: getProperty('CosmosDefaultFont') || '',
         packages,
         qemu: loadQemuConfig(projectDir, targetArch)
     };
@@ -1250,27 +1252,22 @@ function saveProjectProperties(csprojPath: string, props: ProjectProperties): vo
         removeProperty('GCCCompilerFlags');
     }
 
-    if (props.defaultFont) {
-        setProperty('CosmosDefaultFont', props.defaultFont);
+    if (props.enableKeyboard) {
+        removeProperty('CosmosEnableKeyboard');
     } else {
-        removeProperty('CosmosDefaultFont');
+        setProperty('CosmosEnableKeyboard', 'false');
     }
 
-    // Handle graphics package
-    const graphicsRef = '<PackageReference Include="Cosmos.Kernel.Graphics"';
-    if (props.enableGraphics && !content.includes(graphicsRef)) {
-        // Add graphics package
-        const insertPoint = content.indexOf('<PackageReference Include="Cosmos.Kernel.System"');
-        if (insertPoint !== -1) {
-            const lineEnd = content.indexOf('/>', insertPoint) + 2;
-            const version = content.match(/Include="Cosmos\.Kernel\.System"\s+Version="([^"]+)"/)?.[1] || '3.0.7';
-            content = content.slice(0, lineEnd) +
-                `\n    <PackageReference Include="Cosmos.Kernel.Graphics" Version="${version}" />` +
-                content.slice(lineEnd);
-        }
-    } else if (!props.enableGraphics && content.includes(graphicsRef)) {
-        // Remove graphics package
-        content = content.replace(/\s*<PackageReference Include="Cosmos\.Kernel\.Graphics"[^/]*\/>/g, '');
+    if (props.enableNetwork) {
+        removeProperty('CosmosEnableNetwork');
+    } else {
+        setProperty('CosmosEnableNetwork', 'false');
+    }
+
+    if (props.enableScheduler) {
+        removeProperty('CosmosEnableScheduler');
+    } else {
+        setProperty('CosmosEnableScheduler', 'false');
     }
 
     fs.writeFileSync(csprojPath, content);
@@ -1613,18 +1610,35 @@ function getPropertiesWebviewContent(props: ProjectProperties, csprojPath: strin
             <div class="section-content">
             <div class="toggle-field">
                 <div class="toggle-info">
-                    <div class="toggle-label">Graphics Support</div>
-                    <div class="toggle-hint">Framebuffer and font rendering</div>
+                    <div class="toggle-label">Keyboard Support</div>
+                    <div class="toggle-hint">Keyboard input handling</div>
                 </div>
                 <label class="toggle-switch">
-                    <input type="checkbox" id="enableGraphics" ${props.enableGraphics ? 'checked' : ''}>
+                    <input type="checkbox" id="enableKeyboard" ${props.enableKeyboard ? 'checked' : ''}>
                     <span class="toggle-slider"></span>
                 </label>
             </div>
 
-            <div class="field" style="margin-top: 16px;">
-                <label class="field-label">Default Font</label>
-                <input type="text" id="defaultFont" class="field-input" value="${props.defaultFont}" placeholder="Cosmos.Kernel.Graphics.Fonts.DefaultFont.psf">
+            <div class="toggle-field">
+                <div class="toggle-info">
+                    <div class="toggle-label">Network Support</div>
+                    <div class="toggle-hint">Network stack and drivers</div>
+                </div>
+                <label class="toggle-switch">
+                    <input type="checkbox" id="enableNetwork" ${props.enableNetwork ? 'checked' : ''}>
+                    <span class="toggle-slider"></span>
+                </label>
+            </div>
+
+            <div class="toggle-field">
+                <div class="toggle-info">
+                    <div class="toggle-label">Scheduler Support</div>
+                    <div class="toggle-hint">Process and thread scheduling</div>
+                </div>
+                <label class="toggle-switch">
+                    <input type="checkbox" id="enableScheduler" ${props.enableScheduler ? 'checked' : ''}>
+                    <span class="toggle-slider"></span>
+                </label>
             </div>
             </div>
         </div>
@@ -1745,9 +1759,10 @@ function getPropertiesWebviewContent(props: ProjectProperties, csprojPath: strin
                 targetFramework: document.getElementById('targetFramework').value,
                 targetArch: document.getElementById('targetArch').value,
                 kernelClass: document.getElementById('kernelClass').value,
-                enableGraphics: document.getElementById('enableGraphics').checked,
-                gccFlags: document.getElementById('gccFlags').value,
-                defaultFont: document.getElementById('defaultFont').value
+                enableKeyboard: document.getElementById('enableKeyboard').checked,
+                enableNetwork: document.getElementById('enableNetwork').checked,
+                enableScheduler: document.getElementById('enableScheduler').checked,
+                gccFlags: document.getElementById('gccFlags').value
             };
             vscode.postMessage({ command: 'save', properties });
             showSaveStatus('Saved');
@@ -1788,9 +1803,10 @@ function getPropertiesWebviewContent(props: ProjectProperties, csprojPath: strin
         document.getElementById('targetFramework').addEventListener('change', save);
         document.getElementById('targetArch').addEventListener('change', save);
         document.getElementById('kernelClass').addEventListener('input', onInputChange);
-        document.getElementById('enableGraphics').addEventListener('change', save);
+        document.getElementById('enableKeyboard').addEventListener('change', save);
+        document.getElementById('enableNetwork').addEventListener('change', save);
+        document.getElementById('enableScheduler').addEventListener('change', save);
         document.getElementById('gccFlags').addEventListener('input', onInputChange);
-        document.getElementById('defaultFont').addEventListener('input', onInputChange);
 
         // QEMU config auto-save
         document.getElementById('qemuMemory').addEventListener('change', saveQemu);
