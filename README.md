@@ -20,7 +20,6 @@ The extension will prompt to install missing tools automatically.
 
 ## Installation
 
-### Cosmos Tools
 ```bash
 dotnet tool install -g Cosmos.Tools
 cosmos check
