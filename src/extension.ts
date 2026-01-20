@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 import { ProjectTreeProvider } from './providers/projectTree';
 import { ToolsTreeProvider } from './providers/toolsTree';
-import { WelcomeViewProvider } from './providers/welcomeView';
+import { LoadingViewProvider } from './providers/loadingView';
 import { updateCosmosProjectContext, isCosmosProject } from './utils/project';
 import { newProjectCommand } from './commands/newProject';
 import { checkToolsCommand, installToolsCommand } from './commands/tools';
@@ -14,17 +14,20 @@ import { RunDebugAdapterFactory } from './utils/runAdapter';
 
 let projectTreeProvider: ProjectTreeProvider;
 let toolsTreeProvider: ToolsTreeProvider;
-let welcomeViewProvider: WelcomeViewProvider;
+let loadingViewProvider: LoadingViewProvider;
 export let runDebugAdapterFactory: RunDebugAdapterFactory;
 
 export function activate(context: vscode.ExtensionContext) {
     // Check immediately if this is a Cosmos project
     const isCosmos = isCosmosProject();
 
+    // Set cosmos project context early so loading view can show
+    vscode.commands.executeCommand('setContext', 'cosmos:isCosmosProject', isCosmos);
+
     // Initialize tree providers
     projectTreeProvider = new ProjectTreeProvider();
     toolsTreeProvider = new ToolsTreeProvider();
-    welcomeViewProvider = new WelcomeViewProvider(context.extensionUri, isCosmos);
+    loadingViewProvider = new LoadingViewProvider(context.extensionUri);
 
     // Initialize run adapter factory (dummy process initially)
     runDebugAdapterFactory = new RunDebugAdapterFactory(undefined as any);
@@ -34,9 +37,9 @@ export function activate(context: vscode.ExtensionContext) {
     vscode.window.registerTreeDataProvider('cosmos.project', projectTreeProvider);
     vscode.window.registerTreeDataProvider('cosmos.tools', toolsTreeProvider);
 
-    // Register welcome view provider
+    // Register loading view provider
     context.subscriptions.push(
-        vscode.window.registerWebviewViewProvider(WelcomeViewProvider.viewType, welcomeViewProvider)
+        vscode.window.registerWebviewViewProvider(LoadingViewProvider.viewType, loadingViewProvider)
     );
 
     // Register commands
@@ -58,12 +61,10 @@ export function activate(context: vscode.ExtensionContext) {
     if (isCosmos) {
         // Cosmos project: show loading gif, then switch to project settings after delay
         setTimeout(() => {
-            updateCosmosProjectContext();
             vscode.commands.executeCommand('setContext', 'cosmos:initialized', true);
         }, 1500);
     } else {
         // No project: show welcome screen immediately (no loading)
-        updateCosmosProjectContext();
         vscode.commands.executeCommand('setContext', 'cosmos:initialized', true);
     }
 

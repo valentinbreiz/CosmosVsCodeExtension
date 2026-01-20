@@ -54,10 +54,15 @@
     "views": {
       "cosmos": [
         {
+          "id": "cosmos.loading",
+          "name": "Loading",
+          "type": "webview",
+          "when": "!cosmos:initialized"
+        },
+        {
           "id": "cosmos.welcome",
           "name": "Welcome",
-          "type": "webview",
-          "when": "!cosmos:initialized || !cosmos:isCosmosProject"
+          "when": "cosmos:initialized && !cosmos:isCosmosProject"
         },
         {
           "id": "cosmos.project",
@@ -71,6 +76,12 @@
         }
       ]
     },
+    "viewsWelcome": [
+      {
+        "view": "cosmos.welcome",
+        "contents": "Welcome to Cosmos OS Development!\n\nCreate your first bare-metal C# kernel.\n\n[Create Kernel Project](command:cosmos.newProject)\n\nOr open an existing Cosmos project folder.\n\n[Open Folder](command:vscode.openFolder)"
+      }
+    ],
     "commands": [
       {
         "command": "cosmos.newProject",
