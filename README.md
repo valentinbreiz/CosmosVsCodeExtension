@@ -2,8 +2,6 @@
 
 VS Code extension for creating kernel projects with Cosmos OS gen3.
 
-> ⚠️ This extension currently supports **x64** targets **only**. 
-
 ## Getting Started
 
 1. Install the extension
@@ -25,15 +23,8 @@ The extension will prompt to install missing tools automatically.
 ### Cosmos Tools
 ```bash
 dotnet tool install -g Cosmos.Tools
-```
-
-```bash
-dotnet tool install -g Cosmos.Patcher
-```
-
-### Visual Studio Code Extension (VSIX)
-```bash
-code --install-extension cosmos-vscode-1.0.0.vsix
+cosmos check
+cosmos install
 ```
 
 ## License
