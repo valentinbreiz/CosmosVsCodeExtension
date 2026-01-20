@@ -8,9 +8,11 @@ import { getEnvWithDotnetTools, getCommandPath } from '../utils/execution';
 import { getOutputChannel } from '../utils/output';
 import { buildCommand } from './build';
 import { runDebugAdapterFactory } from '../extension';
+import { LogProcessor } from '../utils/logProcessor';
 
 export async function runCommand(arch?: string) {
     const outputChannel = getOutputChannel();
+    const processor = new LogProcessor(outputChannel);
 
     const projectInfo = getProjectInfo();
     if (!projectInfo) {
@@ -131,15 +133,11 @@ export async function runCommand(arch?: string) {
         shell: false
     });
 
-    qemuProcess.stdout?.on('data', (data: Buffer) => {
-        outputChannel.append(data.toString());
-    });
-
-    qemuProcess.stderr?.on('data', (data: Buffer) => {
-        outputChannel.append(data.toString());
-    });
+    qemuProcess.stdout?.on('data', (data) => processor.append(data));
+    qemuProcess.stderr?.on('data', (data) => processor.append(data));
 
     qemuProcess.on('close', (code) => {
+        processor.flush();
         outputChannel.appendLine('');
         outputChannel.appendLine(`QEMU exited with code ${code}`);
     });

@@ -7,6 +7,7 @@ import { getPlatformInfo } from '../utils/cosmos';
 import { getEnvWithDotnetTools, getCommandPath } from '../utils/execution';
 import { getOutputChannel } from '../utils/output';
 import { buildCommand } from './build';
+import { LogProcessor } from '../utils/logProcessor';
 
 let activeQemuProcess: ChildProcess | undefined;
 
@@ -23,6 +24,7 @@ export function onDebugSessionTerminated(session: vscode.DebugSession) {
 
 export async function debugCommand(arch?: string) {
     const outputChannel = getOutputChannel();
+    const processor = new LogProcessor(outputChannel);
     const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
     if (!workspaceFolder) {
         vscode.window.showErrorMessage('No workspace folder open');
@@ -188,15 +190,11 @@ export async function debugCommand(arch?: string) {
 
     activeQemuProcess = qemuProcess;
 
-    qemuProcess.stdout?.on('data', (data: Buffer) => {
-        outputChannel.append(data.toString());
-    });
-
-    qemuProcess.stderr?.on('data', (data: Buffer) => {
-        outputChannel.append(data.toString());
-    });
+    qemuProcess.stdout?.on('data', (data) => processor.append(data));
+    qemuProcess.stderr?.on('data', (data) => processor.append(data));
 
     qemuProcess.on('close', (code) => {
+        processor.flush();
         outputChannel.appendLine('');
         outputChannel.appendLine(`QEMU exited with code ${code}`);
     });

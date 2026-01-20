@@ -2,11 +2,13 @@ import * as vscode from 'vscode';
 import * as path from 'path';
 import { spawn } from 'child_process';
 import { getProjectInfo } from '../utils/project';
-import { getEnvWithDotnetTools } from '../utils/execution';
+import { getEnvWithDotnetTools, getCommandPath } from '../utils/execution';
 import { getBuildChannel } from '../utils/output';
+import { LogProcessor } from '../utils/logProcessor';
 
 export async function buildCommand(arch?: string) {
     const buildChannel = getBuildChannel();
+    const processor = new LogProcessor(buildChannel, true);
 
     // Get project info first to use configured architecture as default
     const projectInfo = getProjectInfo();
@@ -50,24 +52,19 @@ export async function buildCommand(arch?: string) {
     buildChannel.appendLine(`> cosmos ${buildArgs.join(' ')}`);
     buildChannel.appendLine('');
 
-    const buildProcess = spawn('cosmos', buildArgs, {
+    const cosmosPath = getCommandPath('cosmos') || 'cosmos';
+
+    const buildProcess = spawn(cosmosPath, buildArgs, {
         cwd: projectDir,
-        env: getEnvWithDotnetTools(),
-        shell: true
+        env: { ...getEnvWithDotnetTools(), COLUMNS: '1000', CI: 'true' },
+        shell: false
     });
 
-    // Strip ANSI escape codes for clean output in VS Code
-    const stripAnsi = (str: string) => str.replace(/\x1b\[[0-9;]*m/g, '');
-
-    buildProcess.stdout?.on('data', (data: Buffer) => {
-        buildChannel.append(stripAnsi(data.toString()));
-    });
-
-    buildProcess.stderr?.on('data', (data: Buffer) => {
-        buildChannel.append(stripAnsi(data.toString()));
-    });
+    buildProcess.stdout?.on('data', (data) => processor.append(data));
+    buildProcess.stderr?.on('data', (data) => processor.append(data));
 
     buildProcess.on('close', (code) => {
+        processor.flush();
         buildChannel.appendLine('');
         if (code === 0) {
             buildChannel.appendLine('Build completed successfully.');
