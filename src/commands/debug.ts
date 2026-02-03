@@ -8,8 +8,10 @@ import { getEnvWithDotnetTools, getCommandPath } from '../utils/execution';
 import { getOutputChannel } from '../utils/output';
 import { buildCommand } from './build';
 import { LogProcessor } from '../utils/logProcessor';
+import * as os from 'os';
 
 let activeQemuProcess: ChildProcess | undefined;
+let qmpSocketPath: string | undefined;
 
 export function onDebugSessionTerminated(session: vscode.DebugSession) {
     if (activeQemuProcess && session.type === 'cppdbg' && session.name.startsWith('Debug ')) {
@@ -17,9 +19,14 @@ export function onDebugSessionTerminated(session: vscode.DebugSession) {
             activeQemuProcess.kill();
         }
         activeQemuProcess = undefined;
+        qmpSocketPath = undefined;
         // Switch back to Cosmos view
         vscode.commands.executeCommand('workbench.view.extension.cosmos');
     }
+}
+
+export function getQmpSocketPath(): string | undefined {
+    return qmpSocketPath;
 }
 
 export async function debugCommand(arch?: string) {
@@ -163,6 +170,10 @@ export async function debugCommand(arch?: string) {
             qemuArgs.push('-serial', 'stdio');
         }
     }
+
+    // Add QMP socket for live memory inspection
+    qmpSocketPath = path.join(os.tmpdir(), `qemu-qmp-${Date.now()}.sock`);
+    qemuArgs.push('-qmp', `unix:${qmpSocketPath},server,nowait`);
 
     // Add extra arguments if specified
     if (qemuConfig.extraArgs) {
