@@ -1,7 +1,6 @@
 import * as vscode from 'vscode';
-import { QMPClient } from '../utils/qmp';
-import { getQmpSocketPath } from '../commands/debug';
-import { execSync } from 'child_process';
+import { getSharedMemoryPath } from '../commands/debug';
+import * as fs from 'fs';
 
 // Constants from kernel
 const MAGIC_NUMBER = 0x434F534D4F53n; // "COSMOS"
@@ -71,8 +70,7 @@ export interface MemoryState {
 
 let currentMemoryState: MemoryState | null = null;
 let memoryPanel: vscode.WebviewPanel | undefined;
-let qmpClient: QMPClient | null = null;
-let debugBufferAddress: bigint | null = null;
+let shmemPath: string | null = null;
 let pollTimer: NodeJS.Timeout | undefined;
 let isLive: boolean = false;
 
@@ -83,6 +81,8 @@ const POLL_INTERVAL_MS = 1000;
  * Start automatic polling for memory updates.
  */
 function startPolling(): void {
+    console.log('[MemoryDebug] Starting polling...');
+
     // Clear any existing timer
     if (pollTimer) {
         clearInterval(pollTimer);
@@ -92,12 +92,16 @@ function startPolling(): void {
     updateLiveIndicator();
 
     // Poll immediately
+    console.log('[MemoryDebug] First poll...');
     requestMemoryData();
 
     // Then poll at regular intervals
     pollTimer = setInterval(() => {
+        console.log('[MemoryDebug] Polling for updates...');
         requestMemoryData();
     }, POLL_INTERVAL_MS);
+
+    console.log('[MemoryDebug] Polling started, interval:', POLL_INTERVAL_MS, 'ms');
 }
 
 /**
@@ -127,129 +131,49 @@ function updateLiveIndicator(): void {
 }
 
 /**
- * Request memory debug data from kernel via QMP (live, no pausing).
+ * Request memory debug data from kernel via ivshmem (live, zero-pause streaming).
  */
 export async function requestMemoryData(): Promise<void> {
-    const session = vscode.debug.activeDebugSession;
-    if (!session || session.type !== 'cppdbg') {
-        // Debug session ended - stop polling silently
-        if (isLive) {
-            stopPolling();
-        }
-        return;
-    }
-
     try {
-        // Get buffer address (first time only - requires brief pause)
-        if (debugBufferAddress === null) {
-            await getDebugBufferAddress(session);
-        }
-
-        if (debugBufferAddress === null) {
-            throw new Error('Could not determine debug buffer address');
-        }
-
-        // Ensure QMP connection
-        await ensureQmpConnection();
-
-        if (!qmpClient || !qmpClient.isConnected()) {
-            throw new Error('QMP not connected');
-        }
-
-        // Read memory via QMP (no pausing - live data!)
-        console.log('[MemoryDebug] Reading memory at', debugBufferAddress.toString(16));
-        await readAndParseBufferQMP(qmpClient, debugBufferAddress);
-
-        if (memoryPanel) {
-            memoryPanel.reveal(vscode.ViewColumn.Beside, true);
-        }
-
-    } catch (error) {
-        console.error('Failed to request memory data:', error);
-        vscode.window.showErrorMessage(`Failed to read memory: ${error}`);
-        if (memoryPanel) {
-            memoryPanel.reveal(vscode.ViewColumn.Beside, true);
-        }
-    }
-}
-
-/**
- * Get the debug buffer address by reading symbols from the kernel ELF file.
- * No pausing required - reads directly from the binary.
- */
-async function getDebugBufferAddress(session: vscode.DebugSession): Promise<void> {
-    // Get kernel ELF path from debug configuration
-    const config = session.configuration;
-    const kernelPath = config.program;
-
-    if (!kernelPath) {
-        throw new Error('Could not determine kernel path from debug configuration');
-    }
-
-    console.log('[MemoryDebug] Reading symbols from:', kernelPath);
-
-    try {
-        // Use nm to extract symbol address (try multiple possible symbol names)
-        const symbols = ['cosmos_debug_buffer', '__cosmos_debug_start', '__cosmos_get_debug_buffer'];
-
-        for (const symbol of symbols) {
-            try {
-                const output = execSync(`nm -a "${kernelPath}" | grep ${symbol}`, {
-                    encoding: 'utf8',
-                    stdio: ['pipe', 'pipe', 'ignore'] // Suppress stderr
-                });
-
-                // Parse nm output: "ffffffff80123456 D cosmos_debug_buffer"
-                const match = output.match(/([0-9a-fA-F]+)\s+[a-zA-Z]\s+/);
-                if (match) {
-                    debugBufferAddress = BigInt('0x' + match[1]);
-                    console.log(`[MemoryDebug] Found ${symbol} at:`, debugBufferAddress.toString(16));
-                    return;
-                }
-            } catch (e) {
-                // Symbol not found, try next
-                continue;
+        // Get shared memory path (first time only)
+        if (shmemPath === null) {
+            shmemPath = getSharedMemoryPath() || null;
+            if (!shmemPath) {
+                console.log('[MemoryDebug] Shared memory path not yet available, waiting...');
+                return; // Will retry on next poll
             }
+            console.log('[MemoryDebug] Using shared memory file:', shmemPath);
         }
 
-        throw new Error('Could not find debug buffer symbol in kernel binary');
+        // Check if file exists
+        if (!fs.existsSync(shmemPath)) {
+            console.log('[MemoryDebug] Shared memory file not yet created, waiting...');
+            return; // Will retry on next poll
+        }
+
+        // Read and parse buffer from shared memory file (zero-pause!)
+        await readAndParseBufferFromFile(shmemPath);
+
+        if (memoryPanel) {
+            memoryPanel.reveal(vscode.ViewColumn.Beside, true);
+        }
+
     } catch (error) {
-        console.error('[MemoryDebug] Failed to get buffer address:', error);
-        throw error;
+        console.error('[MemoryDebug] Failed to read memory:', error);
+        // Don't show error popup on every poll failure, just log it
+        // The loading screen will remain until we get valid data
     }
 }
 
 /**
- * Ensure QMP connection is established.
+ * Read and parse the debug buffer from shared memory file (zero-pause streaming).
  */
-async function ensureQmpConnection(): Promise<void> {
-    if (qmpClient && qmpClient.isConnected()) {
-        return;
-    }
-
-    const socketPath = getQmpSocketPath();
-    if (!socketPath) {
-        throw new Error('QMP socket path not available');
-    }
-
-    qmpClient = new QMPClient(socketPath);
-
-    // Wait for socket to be created by QEMU
-    await new Promise(resolve => setTimeout(resolve, 500));
-
-    await qmpClient.connect();
-    console.log('[MemoryDebug] QMP connected');
-}
-
-/**
- * Read and parse the debug buffer via QMP (live, no pausing).
- */
-async function readAndParseBufferQMP(qmp: QMPClient, baseAddr: bigint): Promise<void> {
+async function readAndParseBufferFromFile(filePath: string): Promise<void> {
     // Calculate total buffer size
     const bufferSize = 8 + 4 + 8 + 4 + (MAX_LIMINE_ENTRIES * 3 * 8) + 8 + 8 + 8 + 8 + 8 + 8 + 4 + MAX_RAT_SAMPLE;
 
-    // Read entire buffer in one go
-    const buffer = await qmp.readMemory(baseAddr, bufferSize);
+    // Read entire buffer from shared memory file (zero-pause!)
+    const buffer = fs.readFileSync(filePath);
 
     // Parse the buffer
     let offset = 0;
@@ -259,10 +183,10 @@ async function readAndParseBufferQMP(qmp: QMPClient, baseAddr: bigint): Promise<
     const version = buffer.readUInt32LE(offset); offset += 4;
     const timestamp = buffer.readBigUInt64LE(offset); offset += 8;
 
-    console.log('[MemoryDebug] Magic:', magic.toString(16), 'Version:', version, 'Timestamp:', timestamp);
+    console.log('[MemoryDebug] Read from ivshmem - Magic:', '0x' + magic.toString(16), 'Expected:', '0x' + MAGIC_NUMBER.toString(16), 'Version:', version, 'Timestamp:', timestamp);
 
     if (magic !== MAGIC_NUMBER) {
-        throw new Error('Invalid magic number in debug buffer');
+        throw new Error(`Invalid magic number: got 0x${magic.toString(16)}, expected 0x${MAGIC_NUMBER.toString(16)}. Kernel may not have initialized the buffer yet.`);
     }
 
     // Read Limine memory map
@@ -440,10 +364,28 @@ async function readAndParseBuffer(session: vscode.DebugSession, baseAddr: string
 
 /**
  * Update the webview with current memory state.
+ * First time: Replace HTML with full viewer.
+ * Subsequent times: Send data via postMessage for smooth updates.
  */
 function updateWebview(): void {
-    if (memoryPanel && currentMemoryState) {
+    if (!memoryPanel || !currentMemoryState) {
+        return;
+    }
+
+    // Check if we need to do initial HTML load
+    // We detect this by checking if the panel was created with loading HTML
+    const needsInitialLoad = !memoryPanel.webview.html.includes('pages-grid');
+
+    if (needsInitialLoad) {
+        console.log('[MemoryDebug] First data received, loading full viewer HTML...');
         memoryPanel.webview.html = getMemoryWebviewContent(currentMemoryState);
+    } else {
+        // Send updated data to webview for smooth updates
+        console.log('[MemoryDebug] Sending data update to webview, timestamp:', currentMemoryState.lastUpdated);
+        memoryPanel.webview.postMessage({
+            command: 'updateData',
+            data: currentMemoryState
+        });
     }
 }
 
@@ -455,6 +397,20 @@ export function getMemoryState(): MemoryState | null {
 }
 
 export function showMemoryRegions(context: vscode.ExtensionContext) {
+    // Check if debugging has started
+    const path = getSharedMemoryPath();
+    if (!path) {
+        vscode.window.showWarningMessage(
+            'Memory viewer requires an active debug session. Start debugging first (F5 or Debug button).',
+            'Start Debugging'
+        ).then(selection => {
+            if (selection === 'Start Debugging') {
+                vscode.commands.executeCommand('workbench.action.debug.start');
+            }
+        });
+        return;
+    }
+
     // If panel already exists, reveal it
     if (memoryPanel) {
         memoryPanel.reveal(vscode.ViewColumn.Beside);
@@ -513,14 +469,9 @@ export function closeMemoryPanel() {
         memoryPanel.dispose();
         memoryPanel = undefined;
     }
-    // Close QMP connection
-    if (qmpClient) {
-        qmpClient.disconnect();
-        qmpClient = null;
-    }
     // Clear state for next session
     currentMemoryState = null;
-    debugBufferAddress = null;
+    shmemPath = null;
 }
 
 /**
@@ -528,13 +479,8 @@ export function closeMemoryPanel() {
  */
 export function onDebugSessionEnded() {
     stopPolling();
-    // Disconnect QMP
-    if (qmpClient) {
-        qmpClient.disconnect();
-        qmpClient = null;
-    }
-    // Clear buffer address for next session
-    debugBufferAddress = null;
+    // Clear shared memory path for next session
+    shmemPath = null;
 }
 
 /**
@@ -605,7 +551,7 @@ function getLoadingWebviewContent(): string {
     <div class="loading-container">
         <div class="spinner"></div>
         <div class="loading-text">Reading memory debug buffer...</div>
-        <div class="loading-hint">Reading kernel memory via GDB</div>
+        <div class="loading-hint">Streaming kernel memory via ivshmem (zero-pause)</div>
     </div>
 </body>
 </html>`;
@@ -934,8 +880,12 @@ function getMemoryWebviewContent(state: MemoryState): string {
         // Listen for messages from extension
         window.addEventListener('message', event => {
             const message = event.data;
+            console.log('[Webview] Received message:', message.command);
             if (message.command === 'updateLiveStatus') {
                 updateLiveIndicator(message.isLive);
+            } else if (message.command === 'updateData') {
+                console.log('[Webview] Updating data, timestamp:', message.data?.lastUpdated);
+                updateMemoryData(message.data);
             }
         });
 
@@ -953,45 +903,140 @@ function getMemoryWebviewContent(state: MemoryState): string {
             }
         }
 
+        function updateMemoryData(state) {
+            if (!state || !state.pageAllocator) {
+                console.error('[Webview] Invalid state received:', state);
+                return;
+            }
+
+            console.log('[Webview] Updating memory data...');
+            const pa = state.pageAllocator;
+            const usedPercent = ((pa.usedPageCount / pa.totalPageCount) * 100).toFixed(1);
+
+            // Update overview cards
+            const cards = document.querySelectorAll('.overview-card-value');
+            console.log('[Webview] Found', cards.length, 'overview cards');
+            if (cards[0]) cards[0].textContent = formatBytes(pa.ramSize);
+            if (cards[1]) cards[1].textContent = pa.totalPageCount.toLocaleString();
+            if (cards[2]) cards[2].textContent = pa.freePageCount.toLocaleString();
+            if (cards[3]) cards[3].textContent = usedPercent + '%';
+            console.log('[Webview] Updated overview: free pages =', pa.freePageCount);
+
+            // Update pages grid - optimized to prevent flickering
+            const grid = document.querySelector('.pages-grid');
+
+            if (grid && pa.pages && pa.pages.length > 0) {
+                const cells = grid.querySelectorAll('.page-cell');
+
+                // If cell count changed, regenerate entire grid
+                if (cells.length !== pa.pages.length) {
+                    console.log('[Webview] Cell count changed, regenerating grid...');
+                    grid.innerHTML = pa.pages.map(page => {
+                        const color = getPageTypeColor(page.pageType);
+                        return \`<div class="page-cell"
+                            style="background-color: \${color};"
+                            data-page-index="\${page.index}"
+                            data-address="\${page.address}"
+                            data-type="\${page.pageType}"
+                            data-type-name="\${page.pageTypeName}"
+                            data-size="\${page.size}"
+                        ></div>\`;
+                    }).join('');
+                    attachPageHoverHandlers();
+                } else {
+                    // Only update cells that changed
+                    let changedCount = 0;
+                    pa.pages.forEach((page, i) => {
+                        const cell = cells[i];
+                        if (!cell) return;
+
+                        const newColor = getPageTypeColor(page.pageType);
+                        const oldType = cell.dataset.type;
+
+                        // Only update if page type changed
+                        if (oldType !== String(page.pageType)) {
+                            cell.style.backgroundColor = newColor;
+                            cell.dataset.type = String(page.pageType);
+                            cell.dataset.typeName = page.pageTypeName;
+                            cell.dataset.address = page.address;
+                            cell.dataset.size = String(page.size);
+                            changedCount++;
+                        }
+                    });
+                    if (changedCount > 0) {
+                        console.log('[Webview] Updated', changedCount, 'changed cells');
+                    }
+                }
+            }
+        }
+
+        function attachPageHoverHandlers() {
+            document.querySelectorAll('.page-cell').forEach(cell => {
+                cell.addEventListener('mouseenter', function() {
+                    const detailsDiv = document.getElementById('page-details');
+                    if (!detailsDiv) return;
+
+                    const pageIndex = this.dataset.pageIndex;
+                    const address = this.dataset.address;
+                    const typeName = this.dataset.typeName;
+                    const size = this.dataset.size;
+
+                    detailsDiv.innerHTML = \`
+                        <div class="page-details-content">
+                            <div class="info-item">
+                                <span class="info-label">Page Index</span>
+                                <span class="info-value">#\${pageIndex}</span>
+                            </div>
+                            <div class="info-item">
+                                <span class="info-label">Address</span>
+                                <span class="info-value mono">\${address}</span>
+                            </div>
+                            <div class="info-item">
+                                <span class="info-label">Type</span>
+                                <span class="info-value">\${typeName}</span>
+                            </div>
+                            <div class="info-item">
+                                <span class="info-label">Size</span>
+                                <span class="info-value">\${formatBytes(parseInt(size))}</span>
+                            </div>
+                        </div>
+                    \`;
+                });
+            });
+        }
+
+        function formatBytes(bytes) {
+            if (bytes === 0) return '0 B';
+            const k = 1024;
+            const sizes = ['B', 'KB', 'MB', 'GB'];
+            const i = Math.floor(Math.log(bytes) / Math.log(k));
+            return (bytes / Math.pow(k, i)).toFixed(2) + ' ' + sizes[i];
+        }
+
+        function getPageTypeColor(type) {
+            const colors = {
+                0: '#7f8c8d',  // Empty
+                3: '#3498db',  // HeapSmall
+                5: '#9b59b6',  // HeapMedium
+                7: '#e74c3c',  // HeapLarge
+                9: '#f39c12',  // Unmanaged
+                11: '#2ecc71', // PageDirectory
+                32: '#e67e22', // PageAllocator
+                64: '#1abc9c', // SMT
+                128: '#34495e' // Extension
+            };
+            return colors[type] || '#95a5a6';
+        }
+
         function toggleSection(id) {
             const section = document.getElementById(id);
             if (section) section.classList.toggle('collapsed');
         }
 
-        // Page hover handler
-        document.querySelectorAll('.page-cell').forEach(cell => {
-            cell.addEventListener('mouseenter', function() {
-                const detailsDiv = document.getElementById('page-details');
-                if (!detailsDiv) return;
+        // Initial page hover handlers
+        attachPageHoverHandlers();
 
-                const pageIndex = this.dataset.pageIndex;
-                const address = this.dataset.address;
-                const typeName = this.dataset.typeName;
-                const size = this.dataset.size;
-
-                detailsDiv.innerHTML = \`
-                    <div class="page-details-content">
-                        <div class="info-item">
-                            <span class="info-label">Page Index</span>
-                            <span class="info-value">#\${pageIndex}</span>
-                        </div>
-                        <div class="info-item">
-                            <span class="info-label">Address</span>
-                            <span class="info-value mono">\${address}</span>
-                        </div>
-                        <div class="info-item">
-                            <span class="info-label">Size</span>
-                            <span class="info-value">\${(parseInt(size) / 1024).toFixed(0)} KB</span>
-                        </div>
-                        <div class="info-item">
-                            <span class="info-label">Type</span>
-                            <span class="info-value">\${typeName}</span>
-                        </div>
-                    </div>
-                \`;
-            });
-        });
-
+        // Handle mouse leave from pages grid
         document.querySelector('.pages-grid')?.addEventListener('mouseleave', function() {
             const detailsDiv = document.getElementById('page-details');
             if (detailsDiv) {

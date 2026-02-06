@@ -11,7 +11,7 @@ import { LogProcessor } from '../utils/logProcessor';
 import * as os from 'os';
 
 let activeQemuProcess: ChildProcess | undefined;
-let qmpSocketPath: string | undefined;
+let shmemPath: string | undefined;
 
 export function onDebugSessionTerminated(session: vscode.DebugSession) {
     if (activeQemuProcess && session.type === 'cppdbg' && session.name.startsWith('Debug ')) {
@@ -19,14 +19,20 @@ export function onDebugSessionTerminated(session: vscode.DebugSession) {
             activeQemuProcess.kill();
         }
         activeQemuProcess = undefined;
-        qmpSocketPath = undefined;
+
+        // Clean up shared memory file
+        if (shmemPath && fs.existsSync(shmemPath)) {
+            fs.unlinkSync(shmemPath);
+        }
+        shmemPath = undefined;
+
         // Switch back to Cosmos view
         vscode.commands.executeCommand('workbench.view.extension.cosmos');
     }
 }
 
-export function getQmpSocketPath(): string | undefined {
-    return qmpSocketPath;
+export function getSharedMemoryPath(): string | undefined {
+    return shmemPath;
 }
 
 export async function debugCommand(arch?: string) {
@@ -171,9 +177,22 @@ export async function debugCommand(arch?: string) {
         }
     }
 
-    // Add QMP socket for live memory inspection
-    qmpSocketPath = path.join(os.tmpdir(), `qemu-qmp-${Date.now()}.sock`);
-    qemuArgs.push('-qmp', `unix:${qmpSocketPath},server,nowait`);
+    // Add ivshmem device for zero-pause memory streaming
+    // Create shared memory file for debug buffer (4KB)
+    const shmemFilePath = path.join(os.tmpdir(), `cosmos-debug-${Date.now()}.bin`);
+    const debugBufferSize = 4096;
+
+    // Pre-create the shared memory file with correct size
+    fs.writeFileSync(shmemFilePath, Buffer.alloc(debugBufferSize));
+
+    // Add memory-backend-file for ivshmem
+    qemuArgs.push(
+        '-object', `memory-backend-file,id=shmem0,mem-path=${shmemFilePath},size=${debugBufferSize},share=on`,
+        '-device', 'ivshmem-plain,memdev=shmem0'
+    );
+
+    // Store path for memory viewer
+    shmemPath = shmemFilePath;
 
     // Add extra arguments if specified
     if (qemuConfig.extraArgs) {
