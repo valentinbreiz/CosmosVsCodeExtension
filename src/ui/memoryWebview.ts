@@ -58,6 +58,7 @@ export interface PageAllocatorState {
     totalPageCount: number;
     freePageCount: number;
     usedPageCount: number;
+    ratSampleOffset: number;  // Current offset for page sample
     pages: MemoryPage[];
 }
 
@@ -76,6 +77,38 @@ let isLive: boolean = false;
 
 // Polling interval in milliseconds (1 second)
 const POLL_INTERVAL_MS = 1000;
+
+/**
+ * Write offset to shared memory for bidirectional communication.
+ * The kernel will read this offset and populate RAT data from that location.
+ */
+function writeOffsetToSharedMemory(offset: number): void {
+    if (!shmemPath || !fs.existsSync(shmemPath)) {
+        console.error('[MemoryDebug] Cannot write offset: shared memory not available');
+        return;
+    }
+
+    try {
+        // Calculate offset position in buffer
+        // Magic(8) + Version(4) + Timestamp(8) + LimineEntryCount(4) + LimineEntries(MAX*3*8)
+        // + RamStart(8) + HeapEnd(8) + RatLocation(8) + RamSize(8) + TotalPageCount(8) + FreePageCount(8)
+        // = 8 + 4 + 8 + 4 + (64*3*8) + 8 + 8 + 8 + 8 + 8 + 8 = 1596
+        const offsetPosition = 8 + 4 + 8 + 4 + (MAX_LIMINE_ENTRIES * 3 * 8) + 8 + 8 + 8 + 8 + 8 + 8;
+
+        // Read entire buffer
+        const buffer = fs.readFileSync(shmemPath);
+
+        // Write new offset (4 bytes, little-endian)
+        buffer.writeUInt32LE(offset, offsetPosition);
+
+        // Write back to file
+        fs.writeFileSync(shmemPath, buffer);
+
+        console.log('[MemoryDebug] Wrote offset', offset, 'to shared memory at position', offsetPosition);
+    } catch (error) {
+        console.error('[MemoryDebug] Failed to write offset:', error);
+    }
+}
 
 /**
  * Start automatic polling for memory updates.
@@ -169,8 +202,8 @@ export async function requestMemoryData(): Promise<void> {
  * Read and parse the debug buffer from shared memory file (zero-pause streaming).
  */
 async function readAndParseBufferFromFile(filePath: string): Promise<void> {
-    // Calculate total buffer size
-    const bufferSize = 8 + 4 + 8 + 4 + (MAX_LIMINE_ENTRIES * 3 * 8) + 8 + 8 + 8 + 8 + 8 + 8 + 4 + MAX_RAT_SAMPLE;
+    // Calculate total buffer size (added RatSampleOffset = 4 bytes)
+    const bufferSize = 8 + 4 + 8 + 4 + (MAX_LIMINE_ENTRIES * 3 * 8) + 8 + 8 + 8 + 8 + 8 + 8 + 4 + 4 + MAX_RAT_SAMPLE;
 
     // Read entire buffer from shared memory file (zero-pause!)
     const buffer = fs.readFileSync(filePath);
@@ -217,15 +250,17 @@ async function readAndParseBufferFromFile(filePath: string): Promise<void> {
     const totalPageCount = buffer.readBigUInt64LE(offset); offset += 8;
     const freePageCount = buffer.readBigUInt64LE(offset); offset += 8;
 
-    // Read RAT sample
+    // Read RAT sample control (bidirectional)
+    const ratSampleOffset = buffer.readUInt32LE(offset); offset += 4;
     const ratSampleCount = buffer.readUInt32LE(offset); offset += 4;
     const pages: MemoryPage[] = [];
 
     for (let i = 0; i < ratSampleCount && i < MAX_RAT_SAMPLE; i++) {
         const pageType = buffer.readUInt8(offset + i) as PageType;
-        const address = ramStart + BigInt(i * 4096);
+        const actualPageIndex = ratSampleOffset + i;
+        const address = ramStart + BigInt(actualPageIndex * 4096);
         pages.push({
-            index: i,
+            index: actualPageIndex,  // Use actual page index including offset
             address: '0x' + address.toString(16).toUpperCase(),
             size: 4096,
             pageType,
@@ -244,6 +279,7 @@ async function readAndParseBufferFromFile(filePath: string): Promise<void> {
             totalPageCount: Number(totalPageCount),
             freePageCount: Number(freePageCount),
             usedPageCount: Number(totalPageCount - freePageCount),
+            ratSampleOffset: Number(ratSampleOffset),
             pages
         },
         lastUpdated: Date.now()
@@ -327,15 +363,17 @@ async function readAndParseBuffer(session: vscode.DebugSession, baseAddr: string
     const totalPageCount = await readU64(offset); offset += 8;
     const freePageCount = await readU64(offset); offset += 8;
 
-    // Read RAT sample
+    // Read RAT sample control (bidirectional)
+    const ratSampleOffset = await readU32(offset); offset += 4;
     const ratSampleCount = await readU32(offset); offset += 4;
     const pages: MemoryPage[] = [];
 
     for (let i = 0; i < ratSampleCount && i < MAX_RAT_SAMPLE; i++) {
         const pageType = await readU8(offset + i) as PageType;
-        const address = ramStart + BigInt(i * 4096);
+        const actualPageIndex = Number(ratSampleOffset) + i;
+        const address = ramStart + BigInt(actualPageIndex * 4096);
         pages.push({
-            index: i,
+            index: actualPageIndex,  // Use actual page index including offset
             address: '0x' + address.toString(16).toUpperCase(),
             size: 4096,
             pageType,
@@ -354,6 +392,7 @@ async function readAndParseBuffer(session: vscode.DebugSession, baseAddr: string
             totalPageCount: Number(totalPageCount),
             freePageCount: Number(freePageCount),
             usedPageCount: Number(totalPageCount - freePageCount),
+            ratSampleOffset: Number(ratSampleOffset),
             pages
         },
         lastUpdated: Date.now()
@@ -448,7 +487,14 @@ export function showMemoryRegions(context: vscode.ExtensionContext) {
     // Handle messages from webview (none currently, but kept for future use)
     memoryPanel.webview.onDidReceiveMessage(
         message => {
-            // No commands currently handled
+            switch (message.command) {
+                case 'setOffset':
+                    // User changed offset in UI - write to shared memory
+                    writeOffsetToSharedMemory(message.offset);
+                    // Poll immediately to show new region
+                    requestMemoryData();
+                    break;
+            }
         },
         undefined,
         context.subscriptions
@@ -765,6 +811,47 @@ function getMemoryWebviewContent(state: MemoryState): string {
             0%, 100% { opacity: 1; box-shadow: 0 0 0 0 rgba(46, 204, 113, 0.7); }
             50% { opacity: 0.8; box-shadow: 0 0 0 4px rgba(46, 204, 113, 0); }
         }
+
+        .offset-controls {
+            display: flex; align-items: center; gap: 8px;
+            padding: 8px 12px;
+            background: var(--vscode-input-background);
+            border: 1px solid var(--vscode-widget-border, rgba(128,128,128,0.2));
+            border-radius: 6px;
+        }
+        .offset-controls label {
+            font-size: 12px;
+            font-weight: 500;
+            color: var(--vscode-foreground);
+        }
+        .offset-controls input[type="number"] {
+            width: 90px;
+            padding: 4px 8px;
+            background: var(--vscode-input-background);
+            border: 1px solid var(--vscode-input-border);
+            border-radius: 3px;
+            color: var(--vscode-input-foreground);
+            font-size: 12px;
+            font-family: 'SF Mono', Monaco, monospace;
+        }
+        .offset-controls button {
+            padding: 4px 10px;
+            background: var(--vscode-button-secondaryBackground);
+            color: var(--vscode-button-secondaryForeground);
+            border: none;
+            border-radius: 3px;
+            cursor: pointer;
+            font-size: 11px;
+            font-weight: 500;
+        }
+        .offset-controls button:hover {
+            background: var(--vscode-button-secondaryHoverBackground);
+        }
+        .offset-info {
+            font-size: 11px;
+            color: var(--vscode-descriptionForeground);
+            font-family: 'SF Mono', Monaco, monospace;
+        }
     </style>
 </head>
 <body>
@@ -776,6 +863,13 @@ function getMemoryWebviewContent(state: MemoryState): string {
                     <div class="subtitle">Cosmos kernel memory layout and page allocator status</div>
                 </div>
                 <div class="header-actions">
+                    <div class="offset-controls">
+                        <label>Region:</label>
+                        <input type="number" id="offset-input" value="${pa.ratSampleOffset}" min="0" max="${pa.totalPageCount - 1}" step="100" />
+                        <button onclick="decrementOffset()">◀</button>
+                        <button onclick="incrementOffset()">▶</button>
+                        <span class="offset-info">(${pa.ratSampleOffset} - ${pa.ratSampleOffset + pa.pages.length - 1})</span>
+                    </div>
                     <span class="live-indicator">
                         <span class="live-dot"></span>
                         LIVE
@@ -851,7 +945,7 @@ function getMemoryWebviewContent(state: MemoryState): string {
                     <div class="usage-bar-fill" style="width: ${usedPercent}%;"></div>
                 </div>
 
-                <div style="font-size: 13px; font-weight: 500; margin-bottom: 12px;">Page Grid (first ${pa.pages.length} pages)</div>
+                <div id="page-grid-label" style="font-size: 13px; font-weight: 500; margin-bottom: 12px;">Page Grid (pages ${pa.ratSampleOffset} - ${pa.ratSampleOffset + pa.pages.length - 1} of ${pa.totalPageCount})</div>
 
                 <div class="legend">
                     <div class="legend-item"><span class="legend-dot" style="background-color: #2ecc71;"></span>Empty</div>
@@ -903,6 +997,45 @@ function getMemoryWebviewContent(state: MemoryState): string {
             }
         }
 
+        // Global state for offset control
+        let currentTotalPages = ${pa.totalPageCount};
+        let currentSampleSize = ${pa.pages.length};
+
+        function setOffset(newOffset) {
+            const input = document.getElementById('offset-input');
+            if (!input) return;
+
+            // Clamp to valid range
+            newOffset = Math.max(0, Math.min(newOffset, currentTotalPages - 1));
+            input.value = newOffset;
+
+            // Send to extension to write to shared memory
+            vscode.postMessage({
+                command: 'setOffset',
+                offset: newOffset
+            });
+        }
+
+        function incrementOffset() {
+            const input = document.getElementById('offset-input');
+            if (!input) return;
+            const currentOffset = parseInt(input.value) || 0;
+            setOffset(currentOffset + currentSampleSize);
+        }
+
+        function decrementOffset() {
+            const input = document.getElementById('offset-input');
+            if (!input) return;
+            const currentOffset = parseInt(input.value) || 0;
+            setOffset(currentOffset - currentSampleSize);
+        }
+
+        // Handle manual input changes
+        document.getElementById('offset-input')?.addEventListener('change', function(e) {
+            const newOffset = parseInt(e.target.value) || 0;
+            setOffset(newOffset);
+        });
+
         function updateMemoryData(state) {
             if (!state || !state.pageAllocator) {
                 console.error('[Webview] Invalid state received:', state);
@@ -912,6 +1045,26 @@ function getMemoryWebviewContent(state: MemoryState): string {
             console.log('[Webview] Updating memory data...');
             const pa = state.pageAllocator;
             const usedPercent = ((pa.usedPageCount / pa.totalPageCount) * 100).toFixed(1);
+
+            // Update global state for offset controls
+            currentTotalPages = pa.totalPageCount;
+            currentSampleSize = pa.pages.length;
+
+            // Update offset control UI
+            const offsetInput = document.getElementById('offset-input');
+            const offsetInfo = document.querySelector('.offset-info');
+            const pageGridLabel = document.getElementById('page-grid-label');
+            if (offsetInput) {
+                offsetInput.value = pa.ratSampleOffset;
+                offsetInput.max = pa.totalPageCount - 1;
+            }
+            const endOffset = pa.ratSampleOffset + pa.pages.length - 1;
+            if (offsetInfo) {
+                offsetInfo.textContent = \`(\${pa.ratSampleOffset} - \${endOffset})\`;
+            }
+            if (pageGridLabel) {
+                pageGridLabel.textContent = \`Page Grid (pages \${pa.ratSampleOffset} - \${endOffset} of \${pa.totalPageCount})\`;
+            }
 
             // Update overview cards
             const cards = document.querySelectorAll('.overview-card-value');
@@ -928,9 +1081,17 @@ function getMemoryWebviewContent(state: MemoryState): string {
             if (grid && pa.pages && pa.pages.length > 0) {
                 const cells = grid.querySelectorAll('.page-cell');
 
-                // If cell count changed, regenerate entire grid
-                if (cells.length !== pa.pages.length) {
-                    console.log('[Webview] Cell count changed, regenerating grid...');
+                // Check if offset changed (viewing different region)
+                const firstCell = cells[0];
+                const offsetChanged = firstCell && firstCell.dataset.pageIndex !== String(pa.pages[0].index);
+
+                // If cell count changed or offset changed, regenerate entire grid
+                if (cells.length !== pa.pages.length || offsetChanged) {
+                    if (offsetChanged) {
+                        console.log('[Webview] Offset changed, regenerating grid for new region...');
+                    } else {
+                        console.log('[Webview] Cell count changed, regenerating grid...');
+                    }
                     grid.innerHTML = pa.pages.map(page => {
                         const color = getPageTypeColor(page.pageType);
                         return \`<div class="page-cell"
@@ -952,12 +1113,17 @@ function getMemoryWebviewContent(state: MemoryState): string {
 
                         const newColor = getPageTypeColor(page.pageType);
                         const oldType = cell.dataset.type;
+                        const oldIndex = cell.dataset.pageIndex;
+                        const oldAddress = cell.dataset.address;
 
-                        // Only update if page type changed
-                        if (oldType !== String(page.pageType)) {
+                        // Update if page type, index, or address changed
+                        if (oldType !== String(page.pageType) ||
+                            oldIndex !== String(page.index) ||
+                            oldAddress !== page.address) {
                             cell.style.backgroundColor = newColor;
                             cell.dataset.type = String(page.pageType);
                             cell.dataset.typeName = page.pageTypeName;
+                            cell.dataset.pageIndex = String(page.index);
                             cell.dataset.address = page.address;
                             cell.dataset.size = String(page.size);
                             changedCount++;
@@ -1015,17 +1181,17 @@ function getMemoryWebviewContent(state: MemoryState): string {
 
         function getPageTypeColor(type) {
             const colors = {
-                0: '#7f8c8d',  // Empty
+                0: '#2ecc71',  // Empty (GREEN - free pages!)
                 3: '#3498db',  // HeapSmall
                 5: '#9b59b6',  // HeapMedium
                 7: '#e74c3c',  // HeapLarge
                 9: '#f39c12',  // Unmanaged
-                11: '#2ecc71', // PageDirectory
-                32: '#e67e22', // PageAllocator
-                64: '#1abc9c', // SMT
-                128: '#34495e' // Extension
+                11: '#1abc9c', // PageDirectory
+                32: '#7f8c8d', // PageAllocator (RAT - gray)
+                64: '#e67e22', // SMT
+                128: '#95a5a6' // Extension (light gray)
             };
-            return colors[type] || '#95a5a6';
+            return colors[type] || '#bdc3c7';
         }
 
         function toggleSection(id) {
