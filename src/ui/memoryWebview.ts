@@ -764,8 +764,12 @@ function getMemoryWebviewContent(state: MemoryState): string {
         .info-value { font-size: 14px; font-weight: 500; }
         .mono { font-family: 'SF Mono', Monaco, 'Courier New', monospace; font-size: 13px; }
 
-        .usage-bar { height: 6px; background: var(--vscode-editor-background); border-radius: 3px; overflow: hidden; margin-bottom: 16px; }
-        .usage-bar-fill { height: 100%; border-radius: 3px; background: #3498db; }
+        .usage-bar-container {
+            position: relative;
+            margin-bottom: 20px;
+        }
+        .usage-bar { height: 8px; background: var(--vscode-editor-background); border-radius: 4px; overflow: hidden; }
+        .usage-bar-fill { height: 100%; border-radius: 4px; background: #3498db; }
 
         table { width: 100%; border-collapse: collapse; font-size: 13px; }
         th, td { padding: 8px 12px; text-align: left; border-bottom: 1px solid var(--vscode-widget-border, rgba(128,128,128,0.1)); }
@@ -812,45 +816,83 @@ function getMemoryWebviewContent(state: MemoryState): string {
             50% { opacity: 0.8; box-shadow: 0 0 0 4px rgba(46, 204, 113, 0); }
         }
 
-        .offset-controls {
-            display: flex; align-items: center; gap: 8px;
-            padding: 8px 12px;
-            background: var(--vscode-input-background);
-            border: 1px solid var(--vscode-widget-border, rgba(128,128,128,0.2));
-            border-radius: 6px;
+        .region-selector {
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 100%;
+            display: flex;
+            align-items: center;
         }
-        .offset-controls label {
-            font-size: 12px;
-            font-weight: 500;
-            color: var(--vscode-foreground);
-        }
-        .offset-controls input[type="number"] {
-            width: 90px;
-            padding: 4px 8px;
-            background: var(--vscode-input-background);
-            border: 1px solid var(--vscode-input-border);
-            border-radius: 3px;
-            color: var(--vscode-input-foreground);
-            font-size: 12px;
-            font-family: 'SF Mono', Monaco, monospace;
-        }
-        .offset-controls button {
-            padding: 4px 10px;
-            background: var(--vscode-button-secondaryBackground);
-            color: var(--vscode-button-secondaryForeground);
-            border: none;
-            border-radius: 3px;
-            cursor: pointer;
-            font-size: 11px;
-            font-weight: 500;
-        }
-        .offset-controls button:hover {
-            background: var(--vscode-button-secondaryHoverBackground);
-        }
-        .offset-info {
-            font-size: 11px;
+        .region-selector-info {
+            position: absolute;
+            top: -18px;
+            right: 0;
+            font-size: 10px;
             color: var(--vscode-descriptionForeground);
             font-family: 'SF Mono', Monaco, monospace;
+            background: var(--vscode-editor-background);
+            padding: 2px 6px;
+            border-radius: 3px;
+        }
+        .region-selector input[type="range"] {
+            width: 100%;
+            height: 8px;
+            -webkit-appearance: none;
+            appearance: none;
+            background: transparent;
+            border-radius: 4px;
+            outline: none;
+            cursor: pointer;
+        }
+        .region-selector input[type="range"]:disabled {
+            cursor: not-allowed;
+            opacity: 0.5;
+        }
+        .region-selector input[type="range"]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            appearance: none;
+            width: 16px;
+            height: 16px;
+            background: var(--vscode-button-background);
+            border: 2px solid var(--vscode-button-foreground);
+            border-radius: 50%;
+            cursor: grab;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.3);
+        }
+        .region-selector input[type="range"]::-webkit-slider-thumb:hover {
+            background: var(--vscode-button-hoverBackground);
+            transform: scale(1.1);
+        }
+        .region-selector input[type="range"]::-webkit-slider-thumb:active {
+            cursor: grabbing;
+        }
+        .region-selector input[type="range"]:disabled::-webkit-slider-thumb {
+            cursor: not-allowed;
+            background: var(--vscode-input-background);
+            border-color: var(--vscode-descriptionForeground);
+        }
+        .region-selector input[type="range"]::-moz-range-thumb {
+            width: 16px;
+            height: 16px;
+            background: var(--vscode-button-background);
+            border: 2px solid var(--vscode-button-foreground);
+            border-radius: 50%;
+            cursor: grab;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.3);
+        }
+        .region-selector input[type="range"]::-moz-range-thumb:hover {
+            background: var(--vscode-button-hoverBackground);
+            transform: scale(1.1);
+        }
+        .region-selector input[type="range"]::-moz-range-thumb:active {
+            cursor: grabbing;
+        }
+        .region-selector input[type="range"]:disabled::-moz-range-thumb {
+            cursor: not-allowed;
+            background: var(--vscode-input-background);
+            border-color: var(--vscode-descriptionForeground);
         }
     </style>
 </head>
@@ -863,13 +905,6 @@ function getMemoryWebviewContent(state: MemoryState): string {
                     <div class="subtitle">Cosmos kernel memory layout and page allocator status</div>
                 </div>
                 <div class="header-actions">
-                    <div class="offset-controls">
-                        <label>Region:</label>
-                        <input type="number" id="offset-input" value="${pa.ratSampleOffset}" min="0" max="${pa.totalPageCount - 1}" step="100" />
-                        <button onclick="decrementOffset()">◀</button>
-                        <button onclick="incrementOffset()">▶</button>
-                        <span class="offset-info">(${pa.ratSampleOffset} - ${pa.ratSampleOffset + pa.pages.length - 1})</span>
-                    </div>
                     <span class="live-indicator">
                         <span class="live-dot"></span>
                         LIVE
@@ -941,11 +976,21 @@ function getMemoryWebviewContent(state: MemoryState): string {
                     </div>
                 </div>
 
-                <div class="usage-bar">
-                    <div class="usage-bar-fill" style="width: ${usedPercent}%;"></div>
+                <div class="usage-bar-container">
+                    <div class="usage-bar">
+                        <div class="usage-bar-fill" style="width: ${usedPercent}%;"></div>
+                    </div>
+                    <div class="region-selector">
+                        <span class="region-selector-info" id="region-info">Pages ${pa.ratSampleOffset} - ${pa.ratSampleOffset + pa.pages.length - 1} of ${pa.totalPageCount}</span>
+                        <input type="range" id="offset-slider"
+                               value="${pa.ratSampleOffset}"
+                               min="0"
+                               max="${Math.max(0, pa.totalPageCount - pa.pages.length)}"
+                               step="${pa.pages.length}" />
+                    </div>
                 </div>
 
-                <div id="page-grid-label" style="font-size: 13px; font-weight: 500; margin-bottom: 12px;">Page Grid (pages ${pa.ratSampleOffset} - ${pa.ratSampleOffset + pa.pages.length - 1} of ${pa.totalPageCount})</div>
+                <div id="page-grid-label" style="font-size: 13px; font-weight: 500; margin-bottom: 12px;">Page Grid</div>
 
                 <div class="legend">
                     <div class="legend-item"><span class="legend-dot" style="background-color: #2ecc71;"></span>Empty</div>
@@ -986,14 +1031,19 @@ function getMemoryWebviewContent(state: MemoryState): string {
         function updateLiveIndicator(isLive) {
             const indicator = document.querySelector('.live-indicator');
             const dot = document.querySelector('.live-dot');
+            const slider = document.getElementById('offset-slider');
             if (!indicator || !dot) return;
 
             if (isLive) {
                 indicator.innerHTML = '<span class="live-dot"></span>LIVE';
                 dot.style.background = '#2ecc71';
                 dot.style.animation = 'pulse 2s infinite';
+                // Enable navigator when connected
+                if (slider) slider.disabled = false;
             } else {
                 indicator.innerHTML = '<span class="live-dot" style="background: #95a5a6; animation: none;"></span>DISCONNECTED';
+                // Disable navigator when disconnected
+                if (slider) slider.disabled = true;
             }
         }
 
@@ -1002,12 +1052,19 @@ function getMemoryWebviewContent(state: MemoryState): string {
         let currentSampleSize = ${pa.pages.length};
 
         function setOffset(newOffset) {
-            const input = document.getElementById('offset-input');
-            if (!input) return;
+            const slider = document.getElementById('offset-slider');
+            const info = document.getElementById('region-info');
+            if (!slider) return;
 
             // Clamp to valid range
-            newOffset = Math.max(0, Math.min(newOffset, currentTotalPages - 1));
-            input.value = newOffset;
+            newOffset = Math.max(0, Math.min(newOffset, currentTotalPages - currentSampleSize));
+            slider.value = newOffset;
+
+            // Update info text
+            if (info) {
+                const endPage = newOffset + currentSampleSize - 1;
+                info.textContent = 'Pages ' + newOffset + ' - ' + endPage + ' of ' + currentTotalPages;
+            }
 
             // Send to extension to write to shared memory
             vscode.postMessage({
@@ -1016,22 +1073,17 @@ function getMemoryWebviewContent(state: MemoryState): string {
             });
         }
 
-        function incrementOffset() {
-            const input = document.getElementById('offset-input');
-            if (!input) return;
-            const currentOffset = parseInt(input.value) || 0;
-            setOffset(currentOffset + currentSampleSize);
-        }
+        // Handle slider changes
+        document.getElementById('offset-slider')?.addEventListener('input', function(e) {
+            const newOffset = parseInt(e.target.value) || 0;
+            const info = document.getElementById('region-info');
+            if (info) {
+                const endPage = newOffset + currentSampleSize - 1;
+                info.textContent = 'Pages ' + newOffset + ' - ' + endPage + ' of ' + currentTotalPages;
+            }
+        });
 
-        function decrementOffset() {
-            const input = document.getElementById('offset-input');
-            if (!input) return;
-            const currentOffset = parseInt(input.value) || 0;
-            setOffset(currentOffset - currentSampleSize);
-        }
-
-        // Handle manual input changes
-        document.getElementById('offset-input')?.addEventListener('change', function(e) {
+        document.getElementById('offset-slider')?.addEventListener('change', function(e) {
             const newOffset = parseInt(e.target.value) || 0;
             setOffset(newOffset);
         });
@@ -1050,20 +1102,16 @@ function getMemoryWebviewContent(state: MemoryState): string {
             currentTotalPages = pa.totalPageCount;
             currentSampleSize = pa.pages.length;
 
-            // Update offset control UI
-            const offsetInput = document.getElementById('offset-input');
-            const offsetInfo = document.querySelector('.offset-info');
-            const pageGridLabel = document.getElementById('page-grid-label');
-            if (offsetInput) {
-                offsetInput.value = pa.ratSampleOffset;
-                offsetInput.max = pa.totalPageCount - 1;
+            // Update region selector UI
+            const slider = document.getElementById('offset-slider');
+            const regionInfo = document.getElementById('region-info');
+            if (slider) {
+                slider.value = pa.ratSampleOffset;
+                slider.max = Math.max(0, pa.totalPageCount - pa.pages.length);
             }
             const endOffset = pa.ratSampleOffset + pa.pages.length - 1;
-            if (offsetInfo) {
-                offsetInfo.textContent = \`(\${pa.ratSampleOffset} - \${endOffset})\`;
-            }
-            if (pageGridLabel) {
-                pageGridLabel.textContent = \`Page Grid (pages \${pa.ratSampleOffset} - \${endOffset} of \${pa.totalPageCount})\`;
+            if (regionInfo) {
+                regionInfo.textContent = \`Pages \${pa.ratSampleOffset} - \${endOffset} of \${pa.totalPageCount}\`;
             }
 
             // Update overview cards
