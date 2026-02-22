@@ -41,8 +41,9 @@ export class ToolsTreeProvider implements vscode.TreeDataProvider<ToolItem> {
             const result = execWithPath('cosmos check --json', { encoding: 'utf8', timeout: 10000 });
             const data = JSON.parse(result);
 
-            // Add cosmos itself as installed
-            this.tools.push(new ToolItem('Cosmos Tools', true, 'Installed'));
+            // Add cosmos itself as installed, with version from dotnet tool list
+            const cosmosVersion = this.getCosmosToolsVersion();
+            this.tools.push(new ToolItem('Cosmos Tools', true, cosmosVersion ? `${cosmosVersion}` : 'Installed'));
 
             // Parse tool results from JSON
             if (data.tools && Array.isArray(data.tools)) {
@@ -62,6 +63,20 @@ export class ToolsTreeProvider implements vscode.TreeDataProvider<ToolItem> {
             this.tools.push(this.checkCommand('qemu-system-aarch64', 'qemu-system-aarch64 --version', 'QEMU ARM64'));
             this.tools.push(this.checkCommand('gdb', 'gdb --version', 'GDB Debugger'));
         }
+    }
+
+    private getCosmosToolsVersion(): string | null {
+        try {
+            const output = execWithPath('dotnet tool list -g', { encoding: 'utf8', timeout: 5000 });
+            const match = output.split('\n').find(line => line.toLowerCase().startsWith('cosmos.tools'));
+            if (match) {
+                // Format: "cosmos.tools   3.0.37   cosmos"
+                return match.trim().split(/\s+/)[1] ?? null;
+            }
+        } catch {
+            // ignore
+        }
+        return null;
     }
 
     private checkCommand(name: string, command: string, displayName: string): ToolItem {
