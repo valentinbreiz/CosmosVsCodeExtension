@@ -97,8 +97,11 @@ export interface ProjectProperties {
     targetFramework: string;
     targetArch: string;
     kernelClass: string;
+    enableInterrupts: boolean;
+    enableTimer: boolean;
     enableGraphics: boolean;
     enableKeyboard: boolean;
+    enableMouse: boolean;
     enableNetwork: boolean;
     enableScheduler: boolean;
     gccFlags: string;
@@ -221,8 +224,11 @@ export function parseProjectProperties(csprojPath: string): ProjectProperties {
         targetFramework: getProperty('TargetFramework') || 'net10.0',
         targetArch,
         kernelClass: getProperty('CosmosKernelClass') || `${name}.Kernel`,
+        enableInterrupts: getProperty('CosmosEnableInterrupts') !== 'false',
+        enableTimer: getProperty('CosmosEnableTimer') !== 'false',
         enableGraphics: getProperty('CosmosEnableGraphics') !== 'false',
         enableKeyboard: getProperty('CosmosEnableKeyboard') !== 'false',
+        enableMouse: getProperty('CosmosEnableMouse') !== 'false',
         enableNetwork: getProperty('CosmosEnableNetwork') !== 'false',
         enableScheduler: getProperty('CosmosEnableScheduler') !== 'false',
         gccFlags: getProperty('GCCCompilerFlags') || '',
@@ -285,6 +291,18 @@ export function saveProjectProperties(csprojPath: string, props: ProjectProperti
         removeProperty('GCCCompilerFlags');
     }
 
+    if (props.enableInterrupts) {
+        removeProperty('CosmosEnableInterrupts');
+    } else {
+        setProperty('CosmosEnableInterrupts', 'false');
+    }
+
+    if (props.enableTimer) {
+        removeProperty('CosmosEnableTimer');
+    } else {
+        setProperty('CosmosEnableTimer', 'false');
+    }
+
     if (props.enableGraphics) {
         removeProperty('CosmosEnableGraphics');
     } else {
@@ -295,6 +313,12 @@ export function saveProjectProperties(csprojPath: string, props: ProjectProperti
         removeProperty('CosmosEnableKeyboard');
     } else {
         setProperty('CosmosEnableKeyboard', 'false');
+    }
+
+    if (props.enableMouse) {
+        removeProperty('CosmosEnableMouse');
+    } else {
+        setProperty('CosmosEnableMouse', 'false');
     }
 
     if (props.enableNetwork) {

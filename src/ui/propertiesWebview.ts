@@ -292,6 +292,9 @@ function getPropertiesWebviewContent(props: ProjectProperties, csprojPath: strin
             opacity: 0;
             transition: opacity 0.2s;
         }
+        .toggle-field.hidden {
+            display: none;
+        }
     </style>
 </head>
 <body>
@@ -340,6 +343,28 @@ function getPropertiesWebviewContent(props: ProjectProperties, csprojPath: strin
             <div class="section-content">
             <div class="toggle-field">
                 <div class="toggle-info">
+                    <div class="toggle-label">Interrupts</div>
+                    <div class="toggle-hint">Interrupt support, disabling also disables Timer, Keyboard, Mouse, Network, Scheduler, Graphics</div>
+                </div>
+                <label class="toggle-switch">
+                    <input type="checkbox" id="enableInterrupts" ${props.enableInterrupts ? 'checked' : ''}>
+                    <span class="toggle-slider"></span>
+                </label>
+            </div>
+
+            <div class="toggle-field toggle-child" id="field-timer">
+                <div class="toggle-info">
+                    <div class="toggle-label">Timer</div>
+                    <div class="toggle-hint">Timers support, disabling also disables Scheduler</div>
+                </div>
+                <label class="toggle-switch">
+                    <input type="checkbox" id="enableTimer" ${props.enableTimer ? 'checked' : ''}>
+                    <span class="toggle-slider"></span>
+                </label>
+            </div>
+
+            <div class="toggle-field toggle-child" id="field-keyboard">
+                <div class="toggle-info">
                     <div class="toggle-label">Keyboard Support</div>
                     <div class="toggle-hint">Keyboard input handling</div>
                 </div>
@@ -349,7 +374,18 @@ function getPropertiesWebviewContent(props: ProjectProperties, csprojPath: strin
                 </label>
             </div>
 
-            <div class="toggle-field">
+            <div class="toggle-field toggle-child" id="field-mouse">
+                <div class="toggle-info">
+                    <div class="toggle-label">Mouse Support</div>
+                    <div class="toggle-hint">Mouse input handling</div>
+                </div>
+                <label class="toggle-switch">
+                    <input type="checkbox" id="enableMouse" ${props.enableMouse ? 'checked' : ''}>
+                    <span class="toggle-slider"></span>
+                </label>
+            </div>
+
+            <div class="toggle-field toggle-child" id="field-network">
                 <div class="toggle-info">
                     <div class="toggle-label">Network Support</div>
                     <div class="toggle-hint">Network stack and drivers</div>
@@ -360,7 +396,7 @@ function getPropertiesWebviewContent(props: ProjectProperties, csprojPath: strin
                 </label>
             </div>
 
-            <div class="toggle-field">
+            <div class="toggle-field toggle-child toggle-grandchild" id="field-scheduler">
                 <div class="toggle-info">
                     <div class="toggle-label">Scheduler Support</div>
                     <div class="toggle-hint">Process and thread scheduling</div>
@@ -371,10 +407,10 @@ function getPropertiesWebviewContent(props: ProjectProperties, csprojPath: strin
                 </label>
             </div>
 
-            <div class="toggle-field">
+            <div class="toggle-field toggle-child" id="field-graphics">
                 <div class="toggle-info">
                     <div class="toggle-label">Graphic Support</div>
-                    <div class="toggle-hint">Enable VGA graphics display</div>
+                    <div class="toggle-hint">Enable graphics display</div>
                 </div>
                 <label class="toggle-switch">
                     <input type="checkbox" id="enableGraphics" ${props.enableGraphics ? 'checked' : ''}>
@@ -498,8 +534,11 @@ function getPropertiesWebviewContent(props: ProjectProperties, csprojPath: strin
                 targetFramework: document.getElementById('targetFramework').value,
                 targetArch: document.getElementById('targetArch').value,
                 kernelClass: document.getElementById('kernelClass').value,
+                enableInterrupts: document.getElementById('enableInterrupts').checked,
+                enableTimer: document.getElementById('enableTimer').checked,
                 enableGraphics: document.getElementById('enableGraphics').checked,
                 enableKeyboard: document.getElementById('enableKeyboard').checked,
+                enableMouse: document.getElementById('enableMouse').checked,
                 enableNetwork: document.getElementById('enableNetwork').checked,
                 enableScheduler: document.getElementById('enableScheduler').checked,
                 gccFlags: document.getElementById('gccFlags').value
@@ -539,15 +578,32 @@ function getPropertiesWebviewContent(props: ProjectProperties, csprojPath: strin
             qemuSaveTimeout = setTimeout(saveQemu, 300);
         }
 
+        function updateFeatureVisibility() {
+            const interruptsOn = document.getElementById('enableInterrupts').checked;
+            const timerOn = interruptsOn && document.getElementById('enableTimer').checked;
+
+            const interruptChildren = ['field-timer', 'field-keyboard', 'field-mouse', 'field-network', 'field-graphics'];
+            for (const id of interruptChildren) {
+                document.getElementById(id).classList.toggle('hidden', !interruptsOn);
+            }
+            document.getElementById('field-scheduler').classList.toggle('hidden', !timerOn);
+        }
+
         // Auto-save on any input change
         document.getElementById('targetFramework').addEventListener('change', save);
         document.getElementById('targetArch').addEventListener('change', save);
         document.getElementById('kernelClass').addEventListener('input', onInputChange);
+        document.getElementById('enableInterrupts').addEventListener('change', function() { updateFeatureVisibility(); save(); });
+        document.getElementById('enableTimer').addEventListener('change', function() { updateFeatureVisibility(); save(); });
         document.getElementById('enableKeyboard').addEventListener('change', save);
+        document.getElementById('enableMouse').addEventListener('change', save);
         document.getElementById('enableGraphics').addEventListener('change', save);
         document.getElementById('enableNetwork').addEventListener('change', save);
         document.getElementById('enableScheduler').addEventListener('change', save);
         document.getElementById('gccFlags').addEventListener('input', onInputChange);
+
+        // Set initial visibility based on current csproj state
+        updateFeatureVisibility();
 
         // QEMU config auto-save
         document.getElementById('qemuMemory').addEventListener('change', saveQemu);
