@@ -136,6 +136,12 @@
         "title": "Project Properties",
         "icon": "$(settings-gear)",
         "category": "Cosmos"
+      },
+      {
+        "command": "cosmos.memoryRegions",
+        "title": "Memory Regions",
+        "icon": "$(graph)",
+        "category": "Cosmos"
       }
     ],
     "menus": {

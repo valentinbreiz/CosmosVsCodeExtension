@@ -10,6 +10,7 @@ import { runCommand } from './commands/run';
 import { debugCommand, onDebugSessionTerminated } from './commands/debug';
 import { cleanCommand } from './commands/clean';
 import { showProjectProperties } from './ui/propertiesWebview';
+import { showMemoryRegions, onDebugSessionEnded, onDebugSessionStarted } from './ui/memoryWebview';
 import { RunDebugAdapterFactory } from './utils/runAdapter';
 
 let projectTreeProvider: ProjectTreeProvider;
@@ -52,11 +53,34 @@ export function activate(context: vscode.ExtensionContext) {
         vscode.commands.registerCommand('cosmos.debug', debugCommand),
         vscode.commands.registerCommand('cosmos.clean', cleanCommand),
         vscode.commands.registerCommand('cosmos.refreshTools', () => toolsTreeProvider.refresh()),
-        vscode.commands.registerCommand('cosmos.projectProperties', () => showProjectProperties(context, projectTreeProvider))
+        vscode.commands.registerCommand('cosmos.projectProperties', () => showProjectProperties(context, projectTreeProvider)),
+        vscode.commands.registerCommand('cosmos.memoryRegions', () => showMemoryRegions(context))
     );
 
-    // Register debug session termination listener
-    context.subscriptions.push(vscode.debug.onDidTerminateDebugSession(onDebugSessionTerminated));
+    // Register debug session listeners
+    context.subscriptions.push(
+        vscode.debug.onDidStartDebugSession(session => {
+            // Only track Cosmos debug sessions (cppdbg with our naming convention)
+            if (session.type === 'cppdbg' && session.name.startsWith('Debug ')) {
+                vscode.commands.executeCommand('setContext', 'cosmos:debugging', true);
+                // Show Memory Regions entry in project tree
+                projectTreeProvider.setDebugging(true);
+                // Resume memory polling if panel is open
+                onDebugSessionStarted();
+            }
+        }),
+        vscode.debug.onDidTerminateDebugSession(session => {
+            onDebugSessionTerminated(session);
+            // Clear debugging context when session ends
+            if (session.type === 'cppdbg' && session.name.startsWith('Debug ')) {
+                vscode.commands.executeCommand('setContext', 'cosmos:debugging', false);
+                // Hide Memory Regions entry from tree (but keep panel open if user opened it)
+                projectTreeProvider.setDebugging(false);
+                // Stop memory polling and update UI
+                onDebugSessionEnded();
+            }
+        })
+    );
 
     if (isCosmos) {
         // Cosmos project: show loading gif, then switch to project settings after delay
