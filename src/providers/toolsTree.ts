@@ -30,8 +30,6 @@ export class ToolsTreeProvider implements vscode.TreeDataProvider<ToolItem> {
 
         // First check if cosmos is installed
         if (!isCosmosToolsInstalled()) {
-            // Fallback to basic checks if cosmos not installed
-            this.tools.push(this.checkCommand('dotnet', 'dotnet --version', '.NET SDK'));
             this.tools.push(new ToolItem('Cosmos Tools', false, 'Not installed - run: dotnet tool install -g Cosmos.Tools'));
             return;
         }
@@ -51,17 +49,12 @@ export class ToolsTreeProvider implements vscode.TreeDataProvider<ToolItem> {
                     this.tools.push(new ToolItem(
                         tool.displayName,
                         tool.found,
-                        tool.found ? (tool.version || 'Installed') : 'Not installed'
+                        tool.found ? (tool.version || 'Not detected') : 'Not installed'
                     ));
                 }
             }
         } catch (e) {
-            // If cosmos check fails, fall back to basic checks
-            this.tools.push(new ToolItem('Cosmos Tools', true, 'Installed (check failed)'));
-            this.tools.push(this.checkCommand('dotnet', 'dotnet --version', '.NET SDK'));
-            this.tools.push(this.checkCommand('qemu-system-x86_64', 'qemu-system-x86_64 --version', 'QEMU x64'));
-            this.tools.push(this.checkCommand('qemu-system-aarch64', 'qemu-system-aarch64 --version', 'QEMU ARM64'));
-            this.tools.push(this.checkCommand('gdb', 'gdb --version', 'GDB Debugger'));
+            this.tools.push(new ToolItem('Cosmos Tools', false, 'Check failed - reinstall Cosmos.Tools'));
         }
     }
 
@@ -79,14 +72,6 @@ export class ToolsTreeProvider implements vscode.TreeDataProvider<ToolItem> {
         return null;
     }
 
-    private checkCommand(name: string, command: string, displayName: string): ToolItem {
-        try {
-            const output = execWithPath(command, { encoding: 'utf8', timeout: 5000 }).split('\n')[0];
-            return new ToolItem(displayName, true, output.trim());
-        } catch {
-            return new ToolItem(displayName, false, 'Not installed');
-        }
-    }
 }
 
 export class ToolItem extends vscode.TreeItem {
