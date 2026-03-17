@@ -29,7 +29,8 @@ export function getEnvWithDotnetTools(): NodeJS.ProcessEnv {
         path.join(cosmosTools, 'xorriso'),
         path.join(cosmosTools, 'lld'),
         path.join(cosmosTools, 'x86_64-elf-tools', 'bin'),
-        path.join(cosmosTools, 'aarch64-elf-tools', 'bin')
+        path.join(cosmosTools, 'aarch64-elf-tools', 'bin'),
+        path.join(cosmosTools, 'qemu')
     ].join(sep);
 
     return {
