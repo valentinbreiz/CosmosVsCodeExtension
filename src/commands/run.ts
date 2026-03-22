@@ -59,6 +59,7 @@ export async function runCommand(arch?: string) {
         qemuCmd = 'qemu-system-x86_64';
         qemuArgs = [
             '-M', qemuConfig.machineType,
+            '-accel', platformInfo.qemuAccel,
             '-cpu', qemuConfig.cpuModel,
             '-m', qemuConfig.memory,
             '-cdrom', isoPath,
@@ -96,6 +97,7 @@ export async function runCommand(arch?: string) {
         }
 
         qemuArgs.push(
+            '-accel', platformInfo.qemuAccel,
             '-drive', `if=none,id=cd,file=${isoPath}`,
             '-device', 'virtio-scsi-pci',
             '-device', 'scsi-cd,drive=cd,bootindex=0',

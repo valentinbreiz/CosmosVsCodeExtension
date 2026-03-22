@@ -46,10 +46,11 @@ export class ToolsTreeProvider implements vscode.TreeDataProvider<ToolItem> {
             // Parse tool results from JSON
             if (data.tools && Array.isArray(data.tools)) {
                 for (const tool of data.tools) {
+                    const hasVersion = tool.found && tool.version;
                     this.tools.push(new ToolItem(
                         tool.displayName,
-                        tool.found,
-                        tool.found ? (tool.version || 'Not detected') : 'Not installed'
+                        !!hasVersion,
+                        hasVersion ? tool.version : (tool.found ? 'Not detected' : 'Not installed')
                     ));
                 }
             }

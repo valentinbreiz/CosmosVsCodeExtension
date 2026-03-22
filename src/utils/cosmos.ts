@@ -33,6 +33,7 @@ export interface PlatformInfo {
     arch: string;
     packageManager: string;
     qemuDisplay: string;
+    qemuAccel: string;
     gdbCommand: string;
     arm64UefiBios: string | null;
     cosmosToolsPath: string | null;
@@ -66,6 +67,7 @@ export function getPlatformInfo(): PlatformInfo {
         arch: process.arch === 'arm64' ? 'arm64' : 'x64',
         packageManager: isWindows ? 'choco' : isMac ? 'brew' : 'apt',
         qemuDisplay: isWindows ? 'sdl' : isMac ? 'cocoa' : 'gtk',
+        qemuAccel: isWindows ? 'tcg' : isMac ? 'hvf:tcg' : 'kvm:tcg',
         gdbCommand: 'gdb',
         arm64UefiBios: null,
         cosmosToolsPath: null
