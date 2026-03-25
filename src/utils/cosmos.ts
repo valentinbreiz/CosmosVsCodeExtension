@@ -65,7 +65,7 @@ export function getPlatformInfo(): PlatformInfo {
         platformName: isWindows ? 'Windows' : isMac ? 'macOS' : 'Linux',
         arch: process.arch === 'arm64' ? 'arm64' : 'x64',
         packageManager: isWindows ? 'choco' : isMac ? 'brew' : 'apt',
-        qemuDisplay: isWindows ? 'sdl' : isMac ? 'cocoa' : 'gtk',
+        qemuDisplay: isWindows ? 'gtk' : isMac ? 'cocoa' : 'gtk',
         gdbCommand: 'gdb',
         arm64UefiBios: null,
         cosmosToolsPath: null
