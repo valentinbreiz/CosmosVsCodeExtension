@@ -49,7 +49,7 @@ export class ToolsTreeProvider implements vscode.TreeDataProvider<ToolItem> {
                     this.tools.push(new ToolItem(
                         tool.displayName,
                         tool.found,
-                        tool.found ? (tool.version || 'Not detected') : 'Not installed'
+                        tool.found ? (tool.version || 'Installed') : 'Not installed'
                     ));
                 }
             }
