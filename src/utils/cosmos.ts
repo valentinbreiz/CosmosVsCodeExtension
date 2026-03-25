@@ -34,8 +34,6 @@ export interface PlatformInfo {
     packageManager: string;
     qemuDisplay: string;
     gdbCommand: string;
-    arm64UefiBios: string | null;
-    cosmosToolsPath: string | null;
 }
 
 let cachedPlatformInfo: PlatformInfo | null = null;
@@ -66,10 +64,27 @@ export function getPlatformInfo(): PlatformInfo {
         arch: process.arch === 'arm64' ? 'arm64' : 'x64',
         packageManager: isWindows ? 'choco' : isMac ? 'brew' : 'apt',
         qemuDisplay: isWindows ? 'gtk' : isMac ? 'cocoa' : 'gtk',
-        gdbCommand: 'gdb',
-        arm64UefiBios: null,
-        cosmosToolsPath: null
+        gdbCommand: 'gdb'
     };
 
     return cachedPlatformInfo;
+}
+
+export function getArm64UefiBiosPath(): string | null {
+    if (!isCosmosToolsInstalled()) {
+        return null;
+    }
+
+    try {
+        const result = execWithPath('cosmos check --json', { encoding: 'utf8', timeout: 10000 });
+        const data = JSON.parse(result);
+        if (data.tools && Array.isArray(data.tools)) {
+            const efi = data.tools.find((t: any) => t.name === 'QEMU EFI (ARM64)');
+            if (efi?.found && efi?.path) {
+                return efi.path;
+            }
+        }
+    } catch { }
+
+    return null;
 }

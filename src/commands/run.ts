@@ -88,7 +88,8 @@ export async function runCommand(arch?: string) {
         ];
 
         // Use platform-detected UEFI BIOS path
-        const biosPath = platformInfo.arm64UefiBios;
+        const { getArm64UefiBiosPath } = await import('../utils/cosmos');
+        const biosPath = getArm64UefiBiosPath();
         if (biosPath) {
             qemuArgs.push('-bios', biosPath);
         } else {
