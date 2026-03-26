@@ -211,6 +211,7 @@ export async function debugCommand(arch?: string) {
     // Create GDB debug configuration using cppdbg
     // Use platform-detected GDB command
     const gdbPath = platformInfo.gdbCommand;
+    const gdbArch = arch === 'arm64' ? 'aarch64' : 'i386:x86-64';
     const debugConfig: vscode.DebugConfiguration = {
         name: `Debug ${arch} Kernel`,
         type: 'cppdbg',
@@ -222,6 +223,11 @@ export async function debugCommand(arch?: string) {
         miDebuggerServerAddress: `localhost:${gdbPort}`,
         stopAtEntry: false,
         setupCommands: [
+            {
+                description: 'Set target architecture',
+                text: `-gdb-set architecture ${gdbArch}`,
+                ignoreFailures: false
+            },
             {
                 description: 'Enable pretty-printing for gdb',
                 text: '-enable-pretty-printing',
