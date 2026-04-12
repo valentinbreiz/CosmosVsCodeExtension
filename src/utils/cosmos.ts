@@ -65,8 +65,8 @@ export function getPlatformInfo(): PlatformInfo {
         arch: process.arch === 'arm64' ? 'arm64' : 'x64',
         packageManager: isWindows ? 'choco' : isMac ? 'brew' : 'apt',
         qemuDisplay: isWindows ? 'gtk' : isMac ? 'cocoa' : 'gtk',
-        gdbCommandX64: isWindows ? 'x86_64-elf-gdb' : 'gdb',
-        gdbCommandArm64: isWindows ? 'aarch64-none-elf-gdb' : 'gdb-multiarch'
+        gdbCommandX64: 'gdb-multiarch',
+        gdbCommandArm64: 'gdb-multiarch'
     };
 
     return cachedPlatformInfo;
