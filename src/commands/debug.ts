@@ -229,6 +229,8 @@ export async function debugCommand(arch?: string) {
         activeQemuProcess = undefined;
         return;
     }
+    outputChannel.appendLine(`GDB: ${gdbPath}`);
+    outputChannel.appendLine('');
     const debugConfig: vscode.DebugConfiguration = {
         name: `Debug ${arch} Kernel`,
         type: 'cppdbg',
@@ -251,6 +253,16 @@ export async function debugCommand(arch?: string) {
                 ignoreFailures: true
             }
         ],
+        // Surface MI traffic + gdb stderr in the Debug Console so cppdbg errors
+        // aren't hidden behind MIDebugEngine's internal NullReferenceException.
+        logging: {
+            engineLogging: true,
+            programOutput: true,
+            exceptions: true,
+            moduleLoad: false,
+            trace: false,
+            traceResponse: false
+        },
         // Show registers in Variables panel
         showDisplayString: true
     };
