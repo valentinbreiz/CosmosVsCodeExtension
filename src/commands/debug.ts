@@ -243,6 +243,16 @@ export async function debugCommand(arch?: string) {
         stopAtEntry: false,
         setupCommands: [
             {
+                // Must run before -target-select remote. Without this, cppdbg
+                // on a Windows host assumes a Windows user-mode target and
+                // issues qGetTIBAddr during target-select, which QEMU's bare-
+                // metal gdbstub rejects with "Remote target doesn't support
+                // qGetTIBAddr packet".
+                description: 'Disable OS ABI probing (bare-metal kernel)',
+                text: '-gdb-set osabi none',
+                ignoreFailures: false
+            },
+            {
                 description: 'Enable pretty-printing for gdb',
                 text: '-enable-pretty-printing',
                 ignoreFailures: true
