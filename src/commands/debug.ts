@@ -209,8 +209,9 @@ export async function debugCommand(arch?: string) {
     await new Promise(resolve => setTimeout(resolve, 1500));
 
     // Create GDB debug configuration using cppdbg
-    // Use platform-detected GDB command
-    const gdbPath = platformInfo.gdbCommand;
+    // Prefer arch-specific cross-GDB (set by cosmos info), fall back to generic gdbCommand
+    const gdbPath = (arch === 'x64' ? platformInfo.gdbCommandX64 : platformInfo.gdbCommandArm64)
+        || platformInfo.gdbCommand;
     const debugConfig: vscode.DebugConfiguration = {
         name: `Debug ${arch} Kernel`,
         type: 'cppdbg',
@@ -231,11 +232,6 @@ export async function debugCommand(arch?: string) {
                 description: 'Set disassembly flavor to Intel',
                 text: '-gdb-set disassembly-flavor intel',
                 ignoreFailures: true
-            },
-            {
-                description: 'Set target architecture to match QEMU',
-                text: `-gdb-set architecture ${arch === 'x64' ? 'i386:x86-64' : 'aarch64'}`,
-                ignoreFailures: false
             }
         ],
         // Show registers in Variables panel

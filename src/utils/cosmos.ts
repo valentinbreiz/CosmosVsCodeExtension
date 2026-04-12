@@ -34,6 +34,8 @@ export interface PlatformInfo {
     packageManager: string;
     qemuDisplay: string;
     gdbCommand: string;
+    gdbCommandX64?: string;
+    gdbCommandArm64?: string;
 }
 
 let cachedPlatformInfo: PlatformInfo | null = null;
@@ -64,7 +66,9 @@ export function getPlatformInfo(): PlatformInfo {
         arch: process.arch === 'arm64' ? 'arm64' : 'x64',
         packageManager: isWindows ? 'choco' : isMac ? 'brew' : 'apt',
         qemuDisplay: isWindows ? 'gtk' : isMac ? 'cocoa' : 'gtk',
-        gdbCommand: 'gdb'
+        gdbCommand: 'gdb',
+        gdbCommandX64: isWindows ? 'x86_64-elf-gdb' : 'gdb',
+        gdbCommandArm64: isWindows ? 'aarch64-none-elf-gdb' : 'gdb-multiarch'
     };
 
     return cachedPlatformInfo;
