@@ -30,7 +30,9 @@ export function getEnvWithDotnetTools(): NodeJS.ProcessEnv {
         path.join(cosmosTools, 'lld'),
         path.join(cosmosTools, 'x86_64-elf-tools', 'bin'),
         path.join(cosmosTools, 'aarch64-elf-tools', 'bin'),
-        path.join(cosmosTools, 'qemu')
+        path.join(cosmosTools, 'qemu'),
+        // grumpycoder's gdb-multiarch zip extracts to gdb\bin — DLLs live there too
+        path.join(cosmosTools, 'gdb', 'bin')
     ].join(sep);
 
     return {
