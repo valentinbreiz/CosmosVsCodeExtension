@@ -209,9 +209,8 @@ export async function debugCommand(arch?: string) {
     await new Promise(resolve => setTimeout(resolve, 1500));
 
     // Create GDB debug configuration using cppdbg
-    // Prefer arch-specific cross-GDB (set by cosmos info), fall back to generic gdbCommand
-    const gdbPath = (arch === 'x64' ? platformInfo.gdbCommandX64 : platformInfo.gdbCommandArm64)
-        || platformInfo.gdbCommand;
+    // Use arch-specific cross-GDB resolved by cosmos info
+    const gdbPath = arch === 'x64' ? platformInfo.gdbCommandX64 : platformInfo.gdbCommandArm64;
     const debugConfig: vscode.DebugConfiguration = {
         name: `Debug ${arch} Kernel`,
         type: 'cppdbg',
