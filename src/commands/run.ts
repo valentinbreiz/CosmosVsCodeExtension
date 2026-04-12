@@ -101,7 +101,7 @@ export async function runCommand(arch?: string) {
             '-device', 'virtio-scsi-pci',
             '-device', 'scsi-cd,drive=cd,bootindex=0',
             '-device', 'virtio-keyboard-device',
-            '-device', 'ramfb',
+            '-device', 'virtio-gpu-pci',
             '-display', !props.enableGraphics ? 'none' : `${platformInfo.qemuDisplay},show-cursor=on`,
             '-nic', 'none'
         );

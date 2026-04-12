@@ -154,7 +154,7 @@ export async function debugCommand(arch?: string) {
             '-device', 'virtio-scsi-pci',
             '-device', 'scsi-cd,drive=cd,bootindex=0',
             '-device', 'virtio-keyboard-device',
-            '-device', 'ramfb',
+            '-device', 'virtio-gpu-pci',
             '-display', !props.enableGraphics ? 'none' : `${platformInfo.qemuDisplay},show-cursor=on`,
             '-nic', 'none',
             '-s', '-S'  // GDB server on port 1234, freeze CPU at startup
