@@ -231,6 +231,11 @@ export async function debugCommand(arch?: string) {
                 description: 'Set disassembly flavor to Intel',
                 text: '-gdb-set disassembly-flavor intel',
                 ignoreFailures: true
+            },
+            {
+                description: 'Set target architecture to match QEMU',
+                text: `-gdb-set architecture ${arch === 'x64' ? 'i386:x86-64' : 'aarch64'}`,
+                ignoreFailures: false
             }
         ],
         // Show registers in Variables panel
