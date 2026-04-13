@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { isCosmosToolsInstalled } from '../utils/cosmos';
+import { isCosmosToolsInstalled, getToolsCheck, refreshToolsCheck } from '../utils/cosmos';
 import { execWithPath } from '../utils/execution';
 
 export class ToolsTreeProvider implements vscode.TreeDataProvider<ToolItem> {
@@ -34,27 +34,28 @@ export class ToolsTreeProvider implements vscode.TreeDataProvider<ToolItem> {
             return;
         }
 
-        // Use cosmos check --json for cross-platform detection
-        try {
-            const result = execWithPath('cosmos check --json', { encoding: 'utf8', timeout: 10000 });
-            const data = JSON.parse(result);
+        // Refresh the shared cache and read from it
+        refreshToolsCheck();
+        const data = getToolsCheck();
 
-            // Add cosmos itself as installed, with version from dotnet tool list
-            const cosmosVersion = this.getCosmosToolsVersion();
-            this.tools.push(new ToolItem('Cosmos Tools', true, cosmosVersion ? `${cosmosVersion}` : 'Installed'));
-
-            // Parse tool results from JSON
-            if (data.tools && Array.isArray(data.tools)) {
-                for (const tool of data.tools) {
-                    this.tools.push(new ToolItem(
-                        tool.displayName,
-                        tool.found,
-                        tool.found ? (tool.version || 'Installed') : 'Not installed'
-                    ));
-                }
-            }
-        } catch (e) {
+        if (!data) {
             this.tools.push(new ToolItem('Cosmos Tools', false, 'Check failed - reinstall Cosmos.Tools'));
+            return;
+        }
+
+        // Add cosmos itself as installed, with version from dotnet tool list
+        const cosmosVersion = this.getCosmosToolsVersion();
+        this.tools.push(new ToolItem('Cosmos Tools', true, cosmosVersion ? `${cosmosVersion}` : 'Installed'));
+
+        // Parse tool results from JSON
+        if (data.tools && Array.isArray(data.tools)) {
+            for (const tool of data.tools) {
+                this.tools.push(new ToolItem(
+                    tool.displayName,
+                    tool.found,
+                    tool.found ? (tool.version || 'Installed') : 'Not installed'
+                ));
+            }
         }
     }
 

@@ -3,7 +3,7 @@ import * as path from 'path';
 import * as fs from 'fs';
 import { spawn, ChildProcess } from 'child_process';
 import { getProjectInfo, loadQemuConfig, parseProjectProperties } from '../utils/project';
-import { getPlatformInfo } from '../utils/cosmos';
+import { getPlatformInfo, getGdbPath } from '../utils/cosmos';
 import { getEnvWithDotnetTools, getCommandPath } from '../utils/execution';
 import { getOutputChannel } from '../utils/output';
 import { buildCommand } from './build';
@@ -209,16 +209,10 @@ export async function debugCommand(arch?: string) {
     await new Promise(resolve => setTimeout(resolve, 1500));
 
     // Create GDB debug configuration using cppdbg
-    // Use arch-specific cross-GDB resolved by cosmos info, then upgrade to an
-    // absolute path via `where`/`which` — cppdbg on Windows rejects bare command
-    // names with "Unable to determine path to debugger".
-    let gdbPath = arch === 'x64' ? platformInfo.gdbCommandX64 : platformInfo.gdbCommandArm64;
-    if (gdbPath && !path.isAbsolute(gdbPath)) {
-        const resolved = getCommandPath(gdbPath);
-        if (resolved) {
-            gdbPath = resolved;
-        }
-    }
+    // Resolve GDB path from cosmos check (returns absolute path), falling back
+    // to PATH lookup — cppdbg on Windows rejects bare command names with
+    // "Unable to determine path to debugger".
+    let gdbPath = getGdbPath() || getCommandPath('gdb-multiarch');
     if (!gdbPath || (process.platform === 'win32' && !path.isAbsolute(gdbPath))) {
         vscode.window.showErrorMessage(
             'gdb-multiarch not found. Reinstall the Cosmos setup or run `cosmos install --auto --tools`.'
