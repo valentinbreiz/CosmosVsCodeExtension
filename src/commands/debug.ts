@@ -3,7 +3,7 @@ import * as path from 'path';
 import * as fs from 'fs';
 import { spawn, ChildProcess } from 'child_process';
 import { getProjectInfo, loadQemuConfig, parseProjectProperties } from '../utils/project';
-import { getPlatformInfo } from '../utils/cosmos';
+import { getPlatformInfo, getGdbPath } from '../utils/cosmos';
 import { getEnvWithDotnetTools, getCommandPath } from '../utils/execution';
 import { getOutputChannel } from '../utils/output';
 import { buildCommand } from './build';
@@ -209,8 +209,22 @@ export async function debugCommand(arch?: string) {
     await new Promise(resolve => setTimeout(resolve, 1500));
 
     // Create GDB debug configuration using cppdbg
-    // Use platform-detected GDB command
-    const gdbPath = platformInfo.gdbCommand;
+    // Resolve GDB path from cosmos check (returns absolute path), falling back
+    // to PATH lookup — cppdbg on Windows rejects bare command names with
+    // "Unable to determine path to debugger".
+    let gdbPath = getGdbPath() || getCommandPath('gdb-multiarch');
+    if (!gdbPath || (process.platform === 'win32' && !path.isAbsolute(gdbPath))) {
+        vscode.window.showErrorMessage(
+            'gdb-multiarch not found. Reinstall the Cosmos setup or run `cosmos install --auto --tools`.'
+        );
+        if (!activeQemuProcess?.killed) {
+            activeQemuProcess?.kill();
+        }
+        activeQemuProcess = undefined;
+        return;
+    }
+    outputChannel.appendLine(`GDB: ${gdbPath}`);
+    outputChannel.appendLine('');
     const debugConfig: vscode.DebugConfiguration = {
         name: `Debug ${arch} Kernel`,
         type: 'cppdbg',
@@ -223,6 +237,16 @@ export async function debugCommand(arch?: string) {
         stopAtEntry: false,
         setupCommands: [
             {
+                // Must run before -target-select remote. Without this, cppdbg
+                // on a Windows host assumes a Windows user-mode target and
+                // issues qGetTIBAddr during target-select, which QEMU's bare-
+                // metal gdbstub rejects with "Remote target doesn't support
+                // qGetTIBAddr packet".
+                description: 'Disable OS ABI probing (bare-metal kernel)',
+                text: '-gdb-set osabi none',
+                ignoreFailures: false
+            },
+            {
                 description: 'Enable pretty-printing for gdb',
                 text: '-enable-pretty-printing',
                 ignoreFailures: true
@@ -233,6 +257,16 @@ export async function debugCommand(arch?: string) {
                 ignoreFailures: true
             }
         ],
+        // Surface MI traffic + gdb stderr in the Debug Console so cppdbg errors
+        // aren't hidden behind MIDebugEngine's internal NullReferenceException.
+        logging: {
+            engineLogging: true,
+            programOutput: true,
+            exceptions: true,
+            moduleLoad: false,
+            trace: false,
+            traceResponse: false
+        },
         // Show registers in Variables panel
         showDisplayString: true
     };

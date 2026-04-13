@@ -33,7 +33,6 @@ export interface PlatformInfo {
     arch: string;
     packageManager: string;
     qemuDisplay: string;
-    gdbCommand: string;
 }
 
 let cachedPlatformInfo: PlatformInfo | null = null;
@@ -63,28 +62,49 @@ export function getPlatformInfo(): PlatformInfo {
         platformName: isWindows ? 'Windows' : isMac ? 'macOS' : 'Linux',
         arch: process.arch === 'arm64' ? 'arm64' : 'x64',
         packageManager: isWindows ? 'choco' : isMac ? 'brew' : 'apt',
-        qemuDisplay: isWindows ? 'gtk' : isMac ? 'cocoa' : 'gtk',
-        gdbCommand: 'gdb'
+        qemuDisplay: isWindows ? 'gtk' : isMac ? 'cocoa' : 'gtk'
     };
 
     return cachedPlatformInfo;
 }
 
-export function getArm64UefiBiosPath(): string | null {
-    if (!isCosmosToolsInstalled()) {
-        return null;
-    }
+// Cached cosmos check --json result (called once at activation / refresh)
+let cachedToolsCheck: any = null;
 
+export function getToolsCheck(): any {
+    if (cachedToolsCheck) {
+        return cachedToolsCheck;
+    }
+    refreshToolsCheck();
+    return cachedToolsCheck;
+}
+
+export function refreshToolsCheck(): void {
+    cachedToolsCheck = null;
+    if (!isCosmosToolsInstalled()) {
+        return;
+    }
     try {
         const result = execWithPath('cosmos check --json', { encoding: 'utf8', timeout: 10000 });
-        const data = JSON.parse(result);
-        if (data.tools && Array.isArray(data.tools)) {
-            const efi = data.tools.find((t: any) => t.name === 'QEMU EFI (ARM64)');
-            if (efi?.found && efi?.path) {
-                return efi.path;
-            }
-        }
+        cachedToolsCheck = JSON.parse(result);
     } catch { }
+}
 
+function findToolPath(name: string): string | null {
+    const data = getToolsCheck();
+    if (data?.tools && Array.isArray(data.tools)) {
+        const tool = data.tools.find((t: any) => t.name === name);
+        if (tool?.found && tool?.path) {
+            return tool.path;
+        }
+    }
     return null;
+}
+
+export function getGdbPath(): string | null {
+    return findToolPath('gdb-multiarch');
+}
+
+export function getArm64UefiBiosPath(): string | null {
+    return findToolPath('QEMU EFI (ARM64)');
 }
