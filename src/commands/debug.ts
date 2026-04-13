@@ -11,6 +11,26 @@ import { LogProcessor } from '../utils/logProcessor';
 
 let activeQemuProcess: ChildProcess | undefined;
 
+/**
+ * Read cosmos-debug-sources.txt written by the Cosmos SDK during build.
+ * Each line is "dwarfPrefix|localPath", mapping DWARF source paths to
+ * the actual source files in the NuGet cache.
+ */
+function readSourceMap(binDir: string): Record<string, string> {
+    const map: Record<string, string> = {};
+    const mapFile = path.join(binDir, 'cosmos-debug-sources.txt');
+    if (fs.existsSync(mapFile)) {
+        const lines = fs.readFileSync(mapFile, 'utf8').split('\n');
+        for (const line of lines) {
+            const sep = line.indexOf('|');
+            if (sep > 0) {
+                map[line.substring(0, sep)] = line.substring(sep + 1);
+            }
+        }
+    }
+    return map;
+}
+
 export function onDebugSessionTerminated(session: vscode.DebugSession) {
     if (activeQemuProcess && session.type === 'cppdbg' && session.name.startsWith('Debug ')) {
         if (!activeQemuProcess.killed) {
@@ -235,13 +255,10 @@ export async function debugCommand(arch?: string) {
         miDebuggerPath: gdbPath,
         miDebuggerServerAddress: `localhost:${gdbPort}`,
         stopAtEntry: false,
-        // Map deterministic /_/ paths in DWARF back to extracted framework
-        // source files so GDB can display Cosmos framework source code.
-        // Source files are extracted from NuGet packages during kernel build
-        // to <binDir>/cosmos-sources/ by the Cosmos SDK ExtractCosmosDebugSources target.
-        sourceFileMap: {
-            '/_/': path.join(binDir, 'cosmos-sources') + path.sep
-        },
+        // Map deterministic /_/ paths in DWARF back to framework source files
+        // in the NuGet cache. The Cosmos SDK writes cosmos-debug-sources.txt
+        // during build with per-package mappings (no file copying needed).
+        sourceFileMap: readSourceMap(binDir),
         setupCommands: [
             {
                 // Must run before -target-select remote. Without this, cppdbg
