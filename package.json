@@ -40,6 +40,36 @@
         "languages": [
           "csharp"
         ]
+      },
+      {
+        "type": "cosmos-debug",
+        "label": "Cosmos: Debug Kernel",
+        "languages": [
+          "csharp"
+        ],
+        "configurationAttributes": {
+          "launch": {
+            "properties": {}
+          }
+        },
+        "initialConfigurations": [
+          {
+            "name": "Cosmos: Debug Kernel",
+            "type": "cosmos-debug",
+            "request": "launch"
+          }
+        ],
+        "configurationSnippets": [
+          {
+            "label": "Cosmos: Debug Kernel",
+            "description": "Debug a Cosmos kernel in QEMU with GDB",
+            "body": {
+              "name": "Cosmos: Debug Kernel",
+              "type": "cosmos-debug",
+              "request": "launch"
+            }
+          }
+        ]
       }
     ],
     "viewsContainers": {

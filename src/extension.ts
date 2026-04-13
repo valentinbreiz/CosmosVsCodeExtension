@@ -11,6 +11,7 @@ import { debugCommand, onDebugSessionTerminated } from './commands/debug';
 import { cleanCommand } from './commands/clean';
 import { showProjectProperties } from './ui/propertiesWebview';
 import { RunDebugAdapterFactory } from './utils/runAdapter';
+import { CosmosDebugConfigurationProvider, CosmosDebugAdapterFactory, ensureLaunchJson } from './providers/debugConfigProvider';
 
 let projectTreeProvider: ProjectTreeProvider;
 let toolsTreeProvider: ToolsTreeProvider;
@@ -32,6 +33,17 @@ export function activate(context: vscode.ExtensionContext) {
     // Initialize run adapter factory (dummy process initially)
     runDebugAdapterFactory = new RunDebugAdapterFactory(undefined as any);
     context.subscriptions.push(vscode.debug.registerDebugAdapterDescriptorFactory('cosmos-run', runDebugAdapterFactory));
+
+    // Register cosmos-debug adapter factory + configuration provider so
+    // "Cosmos: Debug Kernel" appears in Run and Debug dropdown
+    const debugConfigProvider = new CosmosDebugConfigurationProvider();
+    const debugAdapterFactory = new CosmosDebugAdapterFactory();
+    context.subscriptions.push(
+        vscode.debug.registerDebugConfigurationProvider('cosmos-debug', debugConfigProvider),
+        vscode.debug.registerDebugConfigurationProvider('cosmos-debug', debugConfigProvider,
+            vscode.DebugConfigurationProviderTriggerKind.Dynamic),
+        vscode.debug.registerDebugAdapterDescriptorFactory('cosmos-debug', debugAdapterFactory)
+    );
 
     // Register tree views
     vscode.window.registerTreeDataProvider('cosmos.project', projectTreeProvider);
@@ -59,6 +71,13 @@ export function activate(context: vscode.ExtensionContext) {
     context.subscriptions.push(vscode.debug.onDidTerminateDebugSession(onDebugSessionTerminated));
 
     if (isCosmos) {
+        // Ensure .vscode/launch.json has the Cosmos debug config so the
+        // Run and Debug panel shows "Cosmos: Debug Kernel" immediately
+        const wsFolder = vscode.workspace.workspaceFolders?.[0];
+        if (wsFolder) {
+            ensureLaunchJson(wsFolder);
+        }
+
         // Cosmos project: show loading gif, then switch to project settings after delay
         setTimeout(() => {
             vscode.commands.executeCommand('setContext', 'cosmos:initialized', true);

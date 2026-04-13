@@ -198,6 +198,9 @@ export async function debugCommand(arch?: string) {
         processor.flush();
         outputChannel.appendLine('');
         outputChannel.appendLine(`QEMU exited with code ${code}`);
+        activeQemuProcess = undefined;
+        // Stop the cppdbg debug session when QEMU exits
+        vscode.debug.stopDebugging();
     });
 
     qemuProcess.on('error', (err) => {
