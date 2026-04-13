@@ -235,6 +235,13 @@ export async function debugCommand(arch?: string) {
         miDebuggerPath: gdbPath,
         miDebuggerServerAddress: `localhost:${gdbPort}`,
         stopAtEntry: false,
+        // Map deterministic /_/ paths in DWARF back to extracted framework
+        // source files so GDB can display Cosmos framework source code.
+        // Source files are extracted from NuGet packages during kernel build
+        // to <binDir>/cosmos-sources/ by the Cosmos SDK ExtractCosmosDebugSources target.
+        sourceFileMap: {
+            '/_/': path.join(binDir, 'cosmos-sources') + path.sep
+        },
         setupCommands: [
             {
                 // Must run before -target-select remote. Without this, cppdbg
