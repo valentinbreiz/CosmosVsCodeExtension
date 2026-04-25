@@ -25,11 +25,16 @@ export function getEnvWithDotnetTools(): NodeJS.ProcessEnv {
     const extraPaths = [
         dotnetToolsPath,
         path.join(cosmosTools, 'bin'),
+        path.join(cosmosTools, 'llvm-tools', 'bin'),
         path.join(cosmosTools, 'yasm'),
         path.join(cosmosTools, 'xorriso'),
         path.join(cosmosTools, 'lld'),
         path.join(cosmosTools, 'x86_64-elf-tools', 'bin'),
         path.join(cosmosTools, 'aarch64-elf-tools', 'bin'),
+        // QEMU bundle layout moved exes into bin/ so QEMU's <exec>/../share/qemu
+        // BIOS autodetect resolves correctly. Keep the legacy "qemu" entry for
+        // back-compat with installs that haven't been re-extracted.
+        path.join(cosmosTools, 'qemu', 'bin'),
         path.join(cosmosTools, 'qemu'),
         // grumpycoder's gdb-multiarch zip extracts to gdb\bin — DLLs live there too
         path.join(cosmosTools, 'gdb', 'bin')
