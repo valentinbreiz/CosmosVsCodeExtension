@@ -196,10 +196,17 @@ export async function debugCommand(arch?: string) {
     outputChannel.appendLine(`> ${resolvedQemuCmd} ${qemuArgs.join(' ')}`);
     outputChannel.appendLine('');
 
+    // stdio: ['ignore', 'pipe', 'pipe']
+    //   QEMU on Windows dies under the default `pipe` stdin when launched as
+    //   a child of a non-console GUI process (VS Code) and paused via -S — the
+    //   read end QEMU inherits seems to upset its main loop. Setting stdin to
+    //   'ignore' (NUL on Windows, /dev/null on Unix) sidesteps it. Stdout/stderr
+    //   stay piped so we can stream QEMU's diagnostics into the output channel.
     const qemuProcess = spawn(resolvedQemuCmd, qemuArgs, {
         cwd: projectDir,
         env: getEnvWithDotnetTools(),
-        shell: false
+        shell: false,
+        stdio: ['ignore', 'pipe', 'pipe']
     });
 
     activeQemuProcess = qemuProcess;
