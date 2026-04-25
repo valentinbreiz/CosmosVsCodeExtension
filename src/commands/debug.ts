@@ -2,21 +2,22 @@ import * as vscode from 'vscode';
 import * as path from 'path';
 import * as fs from 'fs';
 import { spawn, ChildProcess } from 'child_process';
-import { getProjectInfo, loadQemuConfig, parseProjectProperties } from '../utils/project';
-import { getGdbPath, getQemuDataDir } from '../utils/cosmos';
+import { getProjectInfo, parseProjectProperties } from '../utils/project';
+import { getCosmosToolsPath, getGdbPath } from '../utils/cosmos';
 import { getEnvWithDotnetTools, getCommandPath } from '../utils/execution';
 import { getOutputChannel } from '../utils/output';
 import { buildCommand } from './build';
 import { LogProcessor } from '../utils/logProcessor';
+import { parseMemoryMb } from '../utils/qemuOptions';
 
-let activeQemuProcess: ChildProcess | undefined;
+let activeCosmosProcess: ChildProcess | undefined;
 
 export function onDebugSessionTerminated(session: vscode.DebugSession) {
-    if (activeQemuProcess && session.type === 'cppdbg' && session.name.startsWith('Debug ')) {
-        if (!activeQemuProcess.killed) {
-            activeQemuProcess.kill();
+    if (activeCosmosProcess && session.type === 'cppdbg' && session.name.startsWith('Debug ')) {
+        if (!activeCosmosProcess.killed) {
+            activeCosmosProcess.kill();
         }
-        activeQemuProcess = undefined;
+        activeCosmosProcess = undefined;
         // Switch back to Cosmos view
         vscode.commands.executeCommand('workbench.view.extension.cosmos');
     }
@@ -38,15 +39,15 @@ export async function debugCommand(arch?: string) {
     }
 
     if (!arch) {
-        // Use project's configured architecture as default
         arch = projectInfo.arch;
     }
 
     const projectDir = path.dirname(projectInfo.csproj);
     const outputDir = path.join(projectDir, `output-${arch}`);
+    // Cosmos kernels build with RuntimeIdentifier=linux-<arch> on every host
+    // OS — the ELF is the bare-metal binary, not a host executable.
     const binDir = path.join(projectDir, 'bin', 'Debug', 'net10.0', `linux-${arch}`);
 
-    // Check if build exists (ISO in output dir)
     if (!fs.existsSync(outputDir)) {
         const build = await vscode.window.showWarningMessage(
             `No build found for ${arch}. Build first?`,
@@ -58,15 +59,11 @@ export async function debugCommand(arch?: string) {
         return;
     }
 
-    // Find ISO in output dir
-    const outputFiles = fs.readdirSync(outputDir);
-    const isoFiles = outputFiles.filter(f => f.endsWith('.iso'));
+    const isoFiles = fs.readdirSync(outputDir).filter(f => f.endsWith('.iso'));
 
-    // Find ELF in bin dir
     let elfPath: string | null = null;
     if (fs.existsSync(binDir)) {
-        const binFiles = fs.readdirSync(binDir);
-        const elfFiles = binFiles.filter(f => f.endsWith('.elf'));
+        const elfFiles = fs.readdirSync(binDir).filter(f => f.endsWith('.elf'));
         if (elfFiles.length > 0) {
             elfPath = path.join(binDir, elfFiles[0]);
         }
@@ -96,131 +93,68 @@ export async function debugCommand(arch?: string) {
 
     const isoPath = path.join(outputDir, isoFiles[0]);
     const gdbPort = 1234;
-    // Get project properties for graphics setting
     const props = parseProjectProperties(projectInfo.csproj);
-    const qemuConfig = props.qemu;
 
-    // Start QEMU with GDB server
-    // -s: Start GDB server on port 1234
-    // -S: Freeze CPU at startup (wait for GDB to connect)
-    let qemuCmd: string;
-    let qemuArgs: string[];
-
-    if (arch === 'x64') {
-        qemuCmd = 'qemu-system-x86_64';
-        qemuArgs = [
-            '-M', qemuConfig.machineType,
-            '-cpu', qemuConfig.cpuModel,
-            '-m', qemuConfig.memory,
-            '-cdrom', isoPath,
-            // Omit -display when graphics are wanted so QEMU picks its compiled-in
-            // default (SDL on Windows, GTK on Linux/macOS). Passing a backend QEMU
-            // wasn't built with causes it to abort.
-            ...(props.enableGraphics ? [] : ['-display', 'none']),
-            '-vga', 'std',
-            '-no-reboot', '-no-shutdown',
-            '-s', '-S'  // GDB server on port 1234, freeze CPU at startup
-        ];
-
-        if (qemuConfig.serialMode === 'stdio') {
-            qemuArgs.push('-serial', 'stdio');
-        }
-
-        if (qemuConfig.enableNetwork) {
-            const ports = qemuConfig.networkPorts.split(',').map(p => p.trim()).filter(p => p);
-            const portForwards = ports.map(p => `hostfwd=udp::${p}-:${p}`).join(',');
-            qemuArgs.push('-netdev', `user,id=net0${portForwards ? ',' + portForwards : ''}`);
-            qemuArgs.push('-device', 'e1000,netdev=net0');
-        } else {
-            qemuArgs.push('-nic', 'none');
-        }
-    } else {
-        qemuCmd = 'qemu-system-aarch64';
-        qemuArgs = [
-            '-M', qemuConfig.machineType,
-            '-cpu', qemuConfig.cpuModel,
-            '-m', qemuConfig.memory
-        ];
-
-        // Use platform-detected UEFI BIOS path
-        const { getArm64UefiBiosPath } = await import('../utils/cosmos');
-        const biosPath = getArm64UefiBiosPath();
-        if (biosPath) {
-            qemuArgs.push('-bios', biosPath);
-        } else {
-            vscode.window.showWarningMessage('ARM64 UEFI BIOS not found. QEMU may fail to boot.');
-        }
-
-        qemuArgs.push(
-            '-drive', `if=none,id=cd,file=${isoPath}`,
-            '-device', 'virtio-scsi-pci',
-            '-device', 'scsi-cd,drive=cd,bootindex=0',
-            '-device', 'virtio-keyboard-device',
-            '-device', 'ramfb',
-            ...(props.enableGraphics ? [] : ['-display', 'none']),
-            '-nic', 'none',
-            '-s', '-S'  // GDB server on port 1234, freeze CPU at startup
-        );
-
-        if (qemuConfig.serialMode === 'stdio') {
-            qemuArgs.push('-serial', 'stdio');
-        }
+    const cosmosCmd = getCosmosToolsPath();
+    if (!cosmosCmd) {
+        vscode.window.showErrorMessage('cosmos CLI not installed. Install Cosmos.Tools as a dotnet global tool.');
+        return;
     }
 
-    // Add extra arguments if specified
-    if (qemuConfig.extraArgs) {
-        qemuArgs.push(...qemuConfig.extraArgs.split(' ').filter(a => a));
+    // cosmos run --debug => QEMU with -s -S (gdbstub on 1234, frozen at startup).
+    const cosmosArgs = ['run', '-a', arch, '--iso', isoPath, '--debug'];
+    if (!props.enableGraphics) {
+        cosmosArgs.push('--headless');
+    }
+    const memoryMb = parseMemoryMb(props.qemu.memory);
+    if (memoryMb !== null) {
+        cosmosArgs.push('-m', String(memoryMb));
     }
 
-    // Resolve QEMU path for process control
-    const resolvedQemuCmd = getCommandPath(qemuCmd) || qemuCmd;
-
-    // Point QEMU at its bundled data dir (BIOS/firmware live in qemu/share/qemu).
-    // Single rule, no per-OS branching — matches Cosmos.Tools.Launcher.QemuLauncher.
-    const dataDir = getQemuDataDir(resolvedQemuCmd);
-    if (dataDir) {
-        qemuArgs.unshift('-L', dataDir);
-    }
-
-    // Show output in the output channel
     outputChannel.show(true);
     outputChannel.clear();
-    outputChannel.appendLine(`Debugging ${projectInfo.name} (${arch}) with GDB`);
+    outputChannel.appendLine(`Debugging ${projectInfo.name} (${arch}) via cosmos run --debug`);
     outputChannel.appendLine(`GDB server port: ${gdbPort}`);
     outputChannel.appendLine(`ELF: ${elfPath}`);
     outputChannel.appendLine('');
-    outputChannel.appendLine(`> ${resolvedQemuCmd} ${qemuArgs.join(' ')}`);
+    outputChannel.appendLine(`> ${cosmosCmd} ${cosmosArgs.join(' ')}`);
     outputChannel.appendLine('');
 
-    const qemuProcess = spawn(resolvedQemuCmd, qemuArgs, {
+    // stdio: ['ignore', 'pipe', 'pipe']
+    //   QEMU dies under Node's default `pipe` stdin when launched from a non-
+    //   console GUI parent (VS Code) and paused via -S. Setting stdin to 'ignore'
+    //   gives cosmos.exe — and the QEMU it spawns — NUL/dev/null instead of a
+    //   piped fd. Stdout/stderr stay piped so we surface QEMU diagnostics in the
+    //   output channel.
+    const cosmosProcess = spawn(cosmosCmd, cosmosArgs, {
         cwd: projectDir,
         env: getEnvWithDotnetTools(),
-        shell: false
+        shell: false,
+        stdio: ['ignore', 'pipe', 'pipe']
     });
 
-    activeQemuProcess = qemuProcess;
+    activeCosmosProcess = cosmosProcess;
 
-    qemuProcess.stdout?.on('data', (data) => processor.append(data));
-    qemuProcess.stderr?.on('data', (data) => processor.append(data));
+    cosmosProcess.stdout?.on('data', (data) => processor.append(data));
+    cosmosProcess.stderr?.on('data', (data) => processor.append(data));
 
-    qemuProcess.on('close', (code) => {
+    cosmosProcess.on('close', (code) => {
         processor.flush();
         outputChannel.appendLine('');
-        outputChannel.appendLine(`QEMU exited with code ${code}`);
-        activeQemuProcess = undefined;
+        outputChannel.appendLine(`cosmos run exited with code ${code}`);
+        activeCosmosProcess = undefined;
         // Stop the cppdbg debug session when QEMU exits
         vscode.debug.stopDebugging();
     });
 
-    qemuProcess.on('error', (err) => {
+    cosmosProcess.on('error', (err) => {
         outputChannel.appendLine(`Error: ${err.message}`);
-        vscode.window.showErrorMessage(`QEMU error: ${err.message}`);
+        vscode.window.showErrorMessage(`cosmos run error: ${err.message}`);
     });
 
-    // Wait for QEMU to start
+    // Wait for QEMU's gdbstub to come up
     await new Promise(resolve => setTimeout(resolve, 1500));
 
-    // Create GDB debug configuration using cppdbg
     // Resolve GDB path from cosmos check (returns absolute path), falling back
     // to PATH lookup — cppdbg on Windows rejects bare command names with
     // "Unable to determine path to debugger".
@@ -229,14 +163,15 @@ export async function debugCommand(arch?: string) {
         vscode.window.showErrorMessage(
             'gdb-multiarch not found. Reinstall the Cosmos setup or run `cosmos install --auto --tools`.'
         );
-        if (!activeQemuProcess?.killed) {
-            activeQemuProcess?.kill();
+        if (!activeCosmosProcess?.killed) {
+            activeCosmosProcess?.kill();
         }
-        activeQemuProcess = undefined;
+        activeCosmosProcess = undefined;
         return;
     }
     outputChannel.appendLine(`GDB: ${gdbPath}`);
     outputChannel.appendLine('');
+
     const debugConfig: vscode.DebugConfiguration = {
         name: `Debug ${arch} Kernel`,
         type: 'cppdbg',
@@ -283,7 +218,6 @@ export async function debugCommand(arch?: string) {
         showDisplayString: true
     };
 
-    // Start debugging with GDB
     await vscode.debug.startDebugging(workspaceFolder, debugConfig);
 
     // Keep focus on Cosmos view

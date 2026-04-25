@@ -3,12 +3,13 @@ import * as path from 'path';
 import * as fs from 'fs';
 import { spawn } from 'child_process';
 import { getProjectInfo, parseProjectProperties } from '../utils/project';
-import { getPlatformInfo, getQemuDataDir } from '../utils/cosmos';
-import { getEnvWithDotnetTools, getCommandPath } from '../utils/execution';
+import { getCosmosToolsPath, getPlatformInfo } from '../utils/cosmos';
+import { getEnvWithDotnetTools } from '../utils/execution';
 import { getOutputChannel } from '../utils/output';
 import { buildCommand } from './build';
 import { runDebugAdapterFactory } from '../extension';
 import { LogProcessor } from '../utils/logProcessor';
+import { parseMemoryMb } from '../utils/qemuOptions';
 
 export async function runCommand(arch?: string) {
     const outputChannel = getOutputChannel();
@@ -21,7 +22,6 @@ export async function runCommand(arch?: string) {
     }
 
     if (!arch) {
-        // Use project's configured architecture as default
         arch = projectInfo.arch;
     }
 
@@ -46,121 +46,61 @@ export async function runCommand(arch?: string) {
     }
 
     const isoPath = path.join(outputDir, isoFiles[0]);
-    
-    // Get project properties for graphics setting
     const props = parseProjectProperties(projectInfo.csproj);
-    const qemuConfig = props.qemu;
-    const platformInfo = getPlatformInfo();
 
-    let qemuCmd: string;
-    let qemuArgs: string[];
-
-    if (arch === 'x64') {
-        qemuCmd = 'qemu-system-x86_64';
-        qemuArgs = [
-            '-M', qemuConfig.machineType,
-            '-cpu', qemuConfig.cpuModel,
-            '-m', qemuConfig.memory,
-            '-cdrom', isoPath,
-            // Omit -display when graphics are wanted so QEMU picks its compiled-in
-            // default (SDL on Windows, GTK on Linux/macOS). Passing a backend QEMU
-            // wasn't built with causes it to abort.
-            ...(props.enableGraphics ? [] : ['-display', 'none']),
-            '-vga', 'std',
-            '-no-reboot', '-no-shutdown'
-        ];
-
-        if (qemuConfig.serialMode === 'stdio') {
-            qemuArgs.push('-serial', 'stdio');
-        }
-
-        if (qemuConfig.enableNetwork) {
-            const ports = qemuConfig.networkPorts.split(',').map(p => p.trim()).filter(p => p);
-            const portForwards = ports.map(p => `hostfwd=udp::${p}-:${p}`).join(',');
-            qemuArgs.push('-netdev', `user,id=net0${portForwards ? ',' + portForwards : ''}`);
-            qemuArgs.push('-device', 'e1000,netdev=net0');
-        } else {
-            qemuArgs.push('-nic', 'none');
-        }
-    } else {
-        qemuCmd = 'qemu-system-aarch64';
-        qemuArgs = [
-            '-M', qemuConfig.machineType,
-            '-cpu', qemuConfig.cpuModel,
-            '-m', qemuConfig.memory
-        ];
-
-        // Use platform-detected UEFI BIOS path
-        const { getArm64UefiBiosPath } = await import('../utils/cosmos');
-        const biosPath = getArm64UefiBiosPath();
-        if (biosPath) {
-            qemuArgs.push('-bios', biosPath);
-        } else {
-            vscode.window.showWarningMessage('ARM64 UEFI BIOS not found. QEMU may fail to boot.');
-        }
-
-        qemuArgs.push(
-            '-drive', `if=none,id=cd,file=${isoPath}`,
-            '-device', 'virtio-scsi-pci',
-            '-device', 'scsi-cd,drive=cd,bootindex=0',
-            '-device', 'virtio-keyboard-device',
-            '-device', 'ramfb',
-            ...(props.enableGraphics ? [] : ['-display', 'none']),
-            '-nic', 'none'
-        );
-
-        if (qemuConfig.serialMode === 'stdio') {
-            qemuArgs.push('-serial', 'stdio');
-        }
+    const cosmosCmd = getCosmosToolsPath();
+    if (!cosmosCmd) {
+        vscode.window.showErrorMessage('cosmos CLI not installed. Install Cosmos.Tools as a dotnet global tool.');
+        return;
     }
 
-    // Add extra arguments if specified
-    if (qemuConfig.extraArgs) {
-        qemuArgs.push(...qemuConfig.extraArgs.split(' ').filter(a => a));
+    const cosmosArgs = ['run', '-a', arch, '--iso', isoPath];
+    if (!props.enableGraphics) {
+        cosmosArgs.push('--headless');
+    }
+    const memoryMb = parseMemoryMb(props.qemu.memory);
+    if (memoryMb !== null) {
+        cosmosArgs.push('-m', String(memoryMb));
     }
 
-    // Resolve QEMU path for process control
-    const resolvedQemuCmd = getCommandPath(qemuCmd) || qemuCmd;
-
-    // Point QEMU at its bundled data dir (BIOS/firmware live in qemu/share/qemu).
-    // Single rule, no per-OS branching — matches Cosmos.Tools.Launcher.QemuLauncher.
-    const dataDir = getQemuDataDir(resolvedQemuCmd);
-    if (dataDir) {
-        qemuArgs.unshift('-L', dataDir);
-    }
-
-    // Show output in the output channel
     outputChannel.show(true);
     outputChannel.clear();
-    outputChannel.appendLine(`Running ${projectInfo.name} (${arch}) in QEMU...`);
-    outputChannel.appendLine(`Platform: ${platformInfo.platformName}`);
+    outputChannel.appendLine(`Running ${projectInfo.name} (${arch}) via cosmos run`);
+    outputChannel.appendLine(`Platform: ${getPlatformInfo().platformName}`);
     outputChannel.appendLine('');
-    outputChannel.appendLine(`> ${resolvedQemuCmd} ${qemuArgs.join(' ')}`);
+    outputChannel.appendLine(`> ${cosmosCmd} ${cosmosArgs.join(' ')}`);
     outputChannel.appendLine('');
 
-    const qemuProcess = spawn(resolvedQemuCmd, qemuArgs, {
+    // stdio: ['ignore', 'pipe', 'pipe']
+    //   QEMU dies under Node's default `pipe` stdin when launched as a child of
+    //   a non-console GUI process (VS Code) on Windows. Setting stdin to 'ignore'
+    //   gives cosmos.exe — and the QEMU it spawns — NUL/dev/null instead of a
+    //   piped fd. Stdout/stderr stay piped so we stream cosmos+QEMU output into
+    //   the output channel.
+    const cosmosProcess = spawn(cosmosCmd, cosmosArgs, {
         cwd: projectDir,
         env: getEnvWithDotnetTools(),
-        shell: false
+        shell: false,
+        stdio: ['ignore', 'pipe', 'pipe']
     });
 
-    qemuProcess.stdout?.on('data', (data) => processor.append(data));
-    qemuProcess.stderr?.on('data', (data) => processor.append(data));
+    cosmosProcess.stdout?.on('data', (data) => processor.append(data));
+    cosmosProcess.stderr?.on('data', (data) => processor.append(data));
 
-    qemuProcess.on('close', (code) => {
+    cosmosProcess.on('close', (code) => {
         processor.flush();
         outputChannel.appendLine('');
-        outputChannel.appendLine(`QEMU exited with code ${code}`);
+        outputChannel.appendLine(`cosmos run exited with code ${code}`);
     });
 
-    qemuProcess.on('error', (err) => {
+    cosmosProcess.on('error', (err) => {
         outputChannel.appendLine(`Error: ${err.message}`);
-        vscode.window.showErrorMessage(`QEMU error: ${err.message}`);
+        vscode.window.showErrorMessage(`cosmos run error: ${err.message}`);
     });
 
     // Use our custom debug adapter to provide the stop button
-    runDebugAdapterFactory.setProcess(qemuProcess);
-    
+    runDebugAdapterFactory.setProcess(cosmosProcess);
+
     await vscode.debug.startDebugging(undefined, {
         name: `Run ${projectInfo.name}`,
         type: 'cosmos-run',
