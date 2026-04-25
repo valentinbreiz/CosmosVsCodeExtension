@@ -106,3 +106,20 @@ export function getGdbPath(): string | null {
 export function getArm64UefiBiosPath(): string | null {
     return findToolPath('QEMU EFI (ARM64)');
 }
+
+/**
+ * Single rule (matches Cosmos.Tools.Launcher.QemuLauncher): given a QEMU exe
+ * path, return the share/qemu dir to pass to QEMU's `-L`. Cosmos's portable
+ * QEMU bundle does not get auto-discovered by QEMU at runtime, so launchers
+ * must point it at the data dir explicitly. Returns null if no share/qemu
+ * is found relative to the exe — caller should skip -L in that case.
+ */
+export function getQemuDataDir(qemuExePath: string): string | null {
+    const exeDir = path.dirname(qemuExePath);
+    const candidate = path.resolve(exeDir, '..', 'share', 'qemu');
+    if (fs.existsSync(path.join(candidate, 'bios-256k.bin')) ||
+        fs.existsSync(path.join(candidate, 'edk2-aarch64-code.fd'))) {
+        return candidate;
+    }
+    return null;
+}

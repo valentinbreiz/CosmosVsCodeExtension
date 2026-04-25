@@ -3,7 +3,7 @@ import * as path from 'path';
 import * as fs from 'fs';
 import { spawn, ChildProcess } from 'child_process';
 import { getProjectInfo, loadQemuConfig, parseProjectProperties } from '../utils/project';
-import { getGdbPath } from '../utils/cosmos';
+import { getGdbPath, getQemuDataDir } from '../utils/cosmos';
 import { getEnvWithDotnetTools, getCommandPath } from '../utils/execution';
 import { getOutputChannel } from '../utils/output';
 import { buildCommand } from './build';
@@ -174,6 +174,13 @@ export async function debugCommand(arch?: string) {
 
     // Resolve QEMU path for process control
     const resolvedQemuCmd = getCommandPath(qemuCmd) || qemuCmd;
+
+    // Point QEMU at its bundled data dir (BIOS/firmware live in qemu/share/qemu).
+    // Single rule, no per-OS branching — matches Cosmos.Tools.Launcher.QemuLauncher.
+    const dataDir = getQemuDataDir(resolvedQemuCmd);
+    if (dataDir) {
+        qemuArgs.unshift('-L', dataDir);
+    }
 
     // Show output in the output channel
     outputChannel.show(true);
