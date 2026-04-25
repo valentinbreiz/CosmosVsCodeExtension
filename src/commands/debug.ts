@@ -122,9 +122,13 @@ export async function debugCommand(arch?: string) {
             '-s', '-S'  // GDB server on port 1234, freeze CPU at startup
         ];
 
-        if (qemuConfig.serialMode === 'stdio') {
-            qemuArgs.push('-serial', 'stdio');
-        }
+        // -serial stdio dies under Node's pipe stdio on Windows (the GUI VS
+        // Code process has no real console). Route to a file instead — user
+        // can `Get-Content -Wait debug-serial.log` to follow it. Honoured even
+        // when the project sets serialMode=stdio because the alternative is
+        // QEMU exiting immediately.
+        const serialLog = path.join(projectDir, `debug-serial-${arch}.log`);
+        qemuArgs.push('-serial', `file:${serialLog}`);
 
         if (qemuConfig.enableNetwork) {
             const ports = qemuConfig.networkPorts.split(',').map(p => p.trim()).filter(p => p);
@@ -162,9 +166,9 @@ export async function debugCommand(arch?: string) {
             '-s', '-S'  // GDB server on port 1234, freeze CPU at startup
         );
 
-        if (qemuConfig.serialMode === 'stdio') {
-            qemuArgs.push('-serial', 'stdio');
-        }
+        // See x64 branch: -serial stdio dies under Node spawn pipes on Windows.
+        const serialLog = path.join(projectDir, `debug-serial-${arch}.log`);
+        qemuArgs.push('-serial', `file:${serialLog}`);
     }
 
     // Add extra arguments if specified
