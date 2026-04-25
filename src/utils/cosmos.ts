@@ -32,7 +32,6 @@ export interface PlatformInfo {
     platformName: string;
     arch: string;
     packageManager: string;
-    qemuDisplay: string;
 }
 
 let cachedPlatformInfo: PlatformInfo | null = null;
@@ -61,8 +60,7 @@ export function getPlatformInfo(): PlatformInfo {
         platform: isWindows ? 'windows' : isMac ? 'macos' : 'linux',
         platformName: isWindows ? 'Windows' : isMac ? 'macOS' : 'Linux',
         arch: process.arch === 'arm64' ? 'arm64' : 'x64',
-        packageManager: isWindows ? 'choco' : isMac ? 'brew' : 'apt',
-        qemuDisplay: isWindows ? 'gtk' : isMac ? 'cocoa' : 'gtk'
+        packageManager: isWindows ? 'choco' : isMac ? 'brew' : 'apt'
     };
 
     return cachedPlatformInfo;

@@ -3,7 +3,7 @@ import * as path from 'path';
 import * as fs from 'fs';
 import { spawn, ChildProcess } from 'child_process';
 import { getProjectInfo, loadQemuConfig, parseProjectProperties } from '../utils/project';
-import { getPlatformInfo, getGdbPath } from '../utils/cosmos';
+import { getGdbPath } from '../utils/cosmos';
 import { getEnvWithDotnetTools, getCommandPath } from '../utils/execution';
 import { getOutputChannel } from '../utils/output';
 import { buildCommand } from './build';
@@ -99,7 +99,6 @@ export async function debugCommand(arch?: string) {
     // Get project properties for graphics setting
     const props = parseProjectProperties(projectInfo.csproj);
     const qemuConfig = props.qemu;
-    const platformInfo = getPlatformInfo();
 
     // Start QEMU with GDB server
     // -s: Start GDB server on port 1234
@@ -114,7 +113,10 @@ export async function debugCommand(arch?: string) {
             '-cpu', qemuConfig.cpuModel,
             '-m', qemuConfig.memory,
             '-cdrom', isoPath,
-            '-display', !props.enableGraphics ? 'none' : platformInfo.qemuDisplay,
+            // Omit -display when graphics are wanted so QEMU picks its compiled-in
+            // default (SDL on Windows, GTK on Linux/macOS). Passing a backend QEMU
+            // wasn't built with causes it to abort.
+            ...(props.enableGraphics ? [] : ['-display', 'none']),
             '-vga', 'std',
             '-no-reboot', '-no-shutdown',
             '-s', '-S'  // GDB server on port 1234, freeze CPU at startup
@@ -155,7 +157,7 @@ export async function debugCommand(arch?: string) {
             '-device', 'scsi-cd,drive=cd,bootindex=0',
             '-device', 'virtio-keyboard-device',
             '-device', 'ramfb',
-            '-display', !props.enableGraphics ? 'none' : `${platformInfo.qemuDisplay},show-cursor=on`,
+            ...(props.enableGraphics ? [] : ['-display', 'none']),
             '-nic', 'none',
             '-s', '-S'  // GDB server on port 1234, freeze CPU at startup
         );
