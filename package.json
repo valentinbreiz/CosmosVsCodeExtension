@@ -30,6 +30,11 @@
   ],
   "main": "./out/extension.js",
   "contributes": {
+    "breakpoints": [
+      {
+        "language": "csharp"
+      }
+    ],
     "debuggers": [
       {
         "type": "cosmos-run",
