@@ -2,7 +2,7 @@
 // Vendored from WebFreak001/code-debug (Unlicense / public domain).
 // SSH and terminal-emulator paths were stripped — see LICENSE in this directory.
 import * as DebugAdapter from 'vscode-debugadapter';
-import { DebugSession, InitializedEvent, TerminatedEvent, StoppedEvent, ThreadEvent, OutputEvent, ContinuedEvent, Thread, StackFrame, Scope, Source, Handles } from 'vscode-debugadapter';
+import { DebugSession, InitializedEvent, TerminatedEvent, StoppedEvent, ThreadEvent, OutputEvent, ContinuedEvent, Thread, StackFrame, Scope, Source, Handles, ErrorDestination } from 'vscode-debugadapter';
 import { DebugProtocol } from 'vscode-debugprotocol';
 import { Breakpoint, IBackend, Variable, VariableObject, ValuesFormattingMode, MIError } from './backend/backend';
 import { MINode } from './backend/mi_parse';
@@ -344,6 +344,15 @@ export class MI2DebugSession extends DebugSession {
 			};
 			this.sendResponse(response);
 		}, err => {
+			// Same race as threadsRequest: VS Code asks for a stack trace while
+			// the inferior is briefly running (e.g. during a function-call
+			// evaluate). Return an empty stack instead of an error toast.
+			const msg = (err && err.message) || err?.toString?.() || '';
+			if (/thread is running/i.test(msg) || /target is running/i.test(msg)) {
+				response.body = { stackFrames: [] };
+				this.sendResponse(response);
+				return;
+			}
 			this.sendErrorResponse(response, 12, `Failed to get Stack Trace: ${err.toString()}`);
 		});
 	}
@@ -740,7 +749,16 @@ export class MI2DebugSession extends DebugSession {
 					// suppress error for hover as the user may just play with the mouse
 					this.sendResponse(response);
 				} else {
-					this.sendErrorResponse(response, 7, msg.toString());
+					// Same race as threads/stack: function-call evaluates leave
+					// gdb in a transient "running" state. Surface as a normal
+					// failed response (rejection on the caller side) without an
+					// error toast — the caller can retry.
+					const m = msg && msg.toString ? msg.toString() : String(msg);
+					if (/thread is running/i.test(m) || /target is running/i.test(m)) {
+						this.sendErrorResponse(response, 7, m, undefined, ErrorDestination.Telemetry);
+						return;
+					}
+					this.sendErrorResponse(response, 7, m);
 				}
 			});
 		} else {
