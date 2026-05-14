@@ -202,6 +202,16 @@
           "type": "string",
           "default": "512M",
           "description": "Memory allocation for QEMU emulator"
+        },
+        "cosmos.testMode": {
+          "type": "string",
+          "default": "ci",
+          "enum": ["ci", "dev"],
+          "enumDescriptions": [
+            "Headless QEMU (faster, no display)",
+            "Visual QEMU window (slower, useful for inspecting)"
+          ],
+          "description": "Mode used by the Testing view when running Cosmos kernel tests"
         }
       }
     }

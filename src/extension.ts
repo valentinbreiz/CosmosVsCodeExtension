@@ -12,10 +12,13 @@ import { cleanCommand } from './commands/clean';
 import { showProjectProperties } from './ui/propertiesWebview';
 import { RunDebugAdapterFactory } from './utils/runAdapter';
 import { CosmosDebugConfigurationProvider, CosmosDebugAdapterFactory, ensureLaunchJson } from './providers/debugConfigProvider';
+import { CosmosTestController } from './testing/testController';
+import { onTestDebugSessionTerminated } from './testing/debugTestKernel';
 
 let projectTreeProvider: ProjectTreeProvider;
 let toolsTreeProvider: ToolsTreeProvider;
 let loadingViewProvider: LoadingViewProvider;
+let testController: CosmosTestController | undefined;
 export let runDebugAdapterFactory: RunDebugAdapterFactory;
 
 export function activate(context: vscode.ExtensionContext) {
@@ -67,10 +70,16 @@ export function activate(context: vscode.ExtensionContext) {
         vscode.commands.registerCommand('cosmos.projectProperties', () => showProjectProperties(context, projectTreeProvider))
     );
 
-    // Register debug session termination listener
-    context.subscriptions.push(vscode.debug.onDidTerminateDebugSession(onDebugSessionTerminated));
+    // Register debug session termination listeners
+    context.subscriptions.push(
+        vscode.debug.onDidTerminateDebugSession(onDebugSessionTerminated),
+        vscode.debug.onDidTerminateDebugSession(onTestDebugSessionTerminated)
+    );
 
     if (isCosmos) {
+        testController = new CosmosTestController();
+        context.subscriptions.push(testController);
+
         // Ensure .vscode/launch.json has the Cosmos debug config so the
         // Run and Debug panel shows "Cosmos: Debug Kernel" immediately
         const wsFolder = vscode.workspace.workspaceFolders?.[0];
