@@ -52,6 +52,17 @@ export function activate(context: vscode.ExtensionContext) {
         vscode.debug.registerDebugAdapterDescriptorFactory('cosmos-debug', debugAdapterFactory)
     );
 
+    // When a Cosmos debug session ends, swing the sidebar back to the Cosmos
+    // view so the user lands on the project tree instead of an idle Run and
+    // Debug pane. Only triggers for our own debug types.
+    context.subscriptions.push(
+        vscode.debug.onDidTerminateDebugSession(session => {
+            if (session.type === 'cosmos-debug' || session.type === 'cosmos-run') {
+                vscode.commands.executeCommand('workbench.view.extension.cosmos');
+            }
+        })
+    );
+
     // Register tree views
     vscode.window.registerTreeDataProvider('cosmos.project', projectTreeProvider);
     vscode.window.registerTreeDataProvider('cosmos.tools', toolsTreeProvider);
