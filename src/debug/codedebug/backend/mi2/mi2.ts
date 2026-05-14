@@ -814,7 +814,10 @@ export class MI2 extends EventEmitter implements IBackend {
 		if (thread !== 0) {
 			command += `--thread ${thread} --frame ${frame} `;
 		}
-		command += name;
+		// gdb-mi expects the expression as a single c-string token; without
+		// quoting, expressions containing spaces or parens (e.g. casts,
+		// function calls) get misparsed as extra arguments.
+		command += `"${name.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
 
 		return await this.sendCommand(command);
 	}
