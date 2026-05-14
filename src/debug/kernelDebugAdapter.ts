@@ -1,13 +1,44 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
 import * as fs from 'fs';
-import { spawn, ChildProcess } from 'child_process';
+import { spawn, ChildProcess, spawnSync } from 'child_process';
 import { getCosmosToolsPath, getGdbPath } from '../utils/cosmos';
 import { getEnvWithDotnetTools, getCommandPath } from '../utils/execution';
 import { resolveKernelElf } from '../utils/kernelArtifacts';
 import { isPortInUse } from '../utils/portCheck';
 import { parseMemoryMb } from '../utils/qemuOptions';
 import { parseProjectProperties } from '../utils/project';
+
+const gdbPythonCache = new Map<string, boolean>();
+
+/**
+ * Returns true if `gdbPath` was built with Python AND the `gdb` Python module
+ * loads. Python compiled in but missing the data directory (share/gdb/python)
+ * counts as no Python — `import gdb` fails so our pretty-printers can't run.
+ * Cached across calls since shelling out to gdb is non-trivial.
+ */
+function gdbBinaryHasPython(gdbPath: string): boolean {
+    const cached = gdbPythonCache.get(gdbPath);
+    if (cached !== undefined) {
+        return cached;
+    }
+    try {
+        const r = spawnSync(gdbPath, ['-batch', '-ex', 'python import gdb; print("ok")'], {
+            timeout: 5000,
+            encoding: 'utf8'
+        });
+        const out = `${r.stdout || ''}${r.stderr || ''}`;
+        const ok = r.status === 0
+            && /\bok\b/.test(out)
+            && !/Python scripting is not supported/i.test(out)
+            && !/No module named 'gdb'/i.test(out);
+        gdbPythonCache.set(gdbPath, ok);
+        return ok;
+    } catch {
+        gdbPythonCache.set(gdbPath, false);
+        return false;
+    }
+}
 
 /**
  * Args supplied via launch.json. All optional — we infer everything from the
@@ -190,17 +221,37 @@ export class KernelDebugAdapter implements vscode.DebugAdapter {
         // fixed sleep so the attach happens as soon as it's ready.
         await this.waitForPort(gdbPort, 5000);
 
-        const gdbPath = getGdbPath() || getCommandPath('gdb-multiarch') || getCommandPath('gdb');
-        if (!gdbPath) {
+        // Pick a gdb with Python support if any candidate has it (needed for
+        // the NativeAOT pretty-printers). Cosmos's bundled gdb is currently
+        // built --without-python, so fall through to system gdb-multiarch when
+        // that's the case. Falls back to "first available" if none have Python.
+        const gdbCandidates = [getGdbPath(), getCommandPath('gdb-multiarch'), getCommandPath('gdb')]
+            .filter((p): p is string => !!p);
+        if (gdbCandidates.length === 0) {
             throw new Error('gdb-multiarch not found. Run `cosmos install --auto --tools`.');
         }
-        this.outputChannel.appendLine(`GDB: ${gdbPath}`);
+        let gdbPath = gdbCandidates[0];
+        let gdbHasPython = false;
+        for (const candidate of gdbCandidates) {
+            if (gdbBinaryHasPython(candidate)) {
+                gdbPath = candidate;
+                gdbHasPython = true;
+                break;
+            }
+        }
+        this.outputChannel.appendLine(`GDB: ${gdbPath}${gdbHasPython ? '' : ' (no Python — pretty-printers disabled)'}`);
 
         const setupCommands: string[] = ['gdb-set osabi none'];
         if (arch === 'arm64') {
             setupCommands.push('set architecture aarch64');
         } else {
             setupCommands.push('gdb-set disassembly-flavor intel');
+        }
+
+        // Cosmos pretty-printers for NativeAOT managed types (String, __Array<T>, Object).
+        const pyPath = path.join(this.extensionPath, 'resources', 'gdb', 'cosmos_prettyprint.py');
+        if (gdbHasPython && fs.existsSync(pyPath)) {
+            setupCommands.push(`interpreter-exec console "source ${pyPath}"`);
         }
 
         this.spawnGdbAdapter();
