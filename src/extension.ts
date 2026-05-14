@@ -14,6 +14,7 @@ import { RunDebugAdapterFactory } from './utils/runAdapter';
 import { CosmosDebugConfigurationProvider, ensureLaunchJson } from './providers/debugConfigProvider';
 import { CosmosTestController } from './testing/testController';
 import { KernelDebugAdapterFactory } from './debug/kernelDebugAdapter';
+import { KernelThreadsProvider, KernelThreadsTrackerFactory } from './views/kernelThreadsView';
 import { getOutputChannel } from './utils/output';
 
 let projectTreeProvider: ProjectTreeProvider;
@@ -66,6 +67,26 @@ export function activate(context: vscode.ExtensionContext) {
     // Register tree views
     vscode.window.registerTreeDataProvider('cosmos.project', projectTreeProvider);
     vscode.window.registerTreeDataProvider('cosmos.tools', toolsTreeProvider);
+
+    // Kernel introspection views — only meaningful during a cosmos-debug
+    // session. Show "Start a debug session" placeholder when idle.
+    const kernelThreadsProvider = new KernelThreadsProvider();
+    kernelThreadsProvider.setMessage('Start a Cosmos debug session to inspect kernel threads.');
+    vscode.window.registerTreeDataProvider('cosmos.kernelThreads', kernelThreadsProvider);
+    context.subscriptions.push(
+        vscode.debug.registerDebugAdapterTrackerFactory('cosmos-debug', new KernelThreadsTrackerFactory(kernelThreadsProvider)),
+        vscode.commands.registerCommand('cosmos.kernelThreads.copy', async () => {
+            const text = kernelThreadsProvider.serialize();
+            await vscode.env.clipboard.writeText(text);
+            vscode.window.setStatusBarMessage('Kernel Threads copied to clipboard', 2000);
+        }),
+        vscode.commands.registerCommand('cosmos.kernelThreads.refresh', () => {
+            const session = vscode.debug.activeDebugSession;
+            if (session && session.type === 'cosmos-debug') {
+                kernelThreadsProvider.refresh(session);
+            }
+        })
+    );
 
     // Register loading view provider
     context.subscriptions.push(

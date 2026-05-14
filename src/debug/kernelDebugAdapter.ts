@@ -8,8 +8,48 @@ import { resolveKernelElf } from '../utils/kernelArtifacts';
 import { isPortInUse } from '../utils/portCheck';
 import { parseMemoryMb } from '../utils/qemuOptions';
 import { parseProjectProperties } from '../utils/project';
+import { QmpClient } from './qmpClient';
+import { registerLiveReader, unregisterLiveReader, LiveReader } from './liveReader';
 
 const gdbPythonCache = new Map<string, boolean>();
+
+/**
+ * Pulls a symbol's runtime virtual address out of the kernel ELF via `nm`.
+ * Returns undefined if `nm` isn't available or the symbol isn't found.
+ */
+function resolveSymbolAddress(elfPath: string, symbol: string): bigint | undefined {
+    try {
+        // Pre-filter via grep so we stay well under any buffer cap and avoid
+        // shipping 1MB+ of nm output across the spawn boundary. Falls back to
+        // raw nm if grep is missing (e.g. Windows without GnuWin32).
+        const grep = spawnSync('sh', ['-c', `nm "${elfPath}" | grep -E "[[:space:]]${symbol}\\$"`], {
+            timeout: 15000,
+            encoding: 'utf8',
+            maxBuffer: 4 * 1024 * 1024
+        });
+        let out = grep.stdout || '';
+        if (!out) {
+            const raw = spawnSync('nm', [elfPath], {
+                timeout: 30000,
+                encoding: 'utf8',
+                maxBuffer: 64 * 1024 * 1024
+            });
+            out = raw.stdout || '';
+        }
+        if (!out) {
+            return undefined;
+        }
+        const escaped = symbol.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        const re = new RegExp(`^([0-9a-fA-F]+)\\s+\\S\\s+${escaped}\\s*$`, 'm');
+        const m = out.match(re);
+        if (!m) {
+            return undefined;
+        }
+        return BigInt('0x' + m[1]);
+    } catch {
+        return undefined;
+    }
+}
 
 /**
  * Returns true if `gdbPath` was built with Python AND the `gdb` Python module
@@ -49,6 +89,7 @@ export interface KernelDebugLaunchArgs {
     projectDir?: string;       // override the workspace project (used for test kernels)
     kernelName?: string;       // override the project name (used for test kernels)
     gdbPort?: number;          // default 1234
+    qmpPort?: number;          // default 4444 — QMP socket for live (no-pause) memory reads
 }
 
 const GDB_DAP_FRAME_END = Buffer.from('\r\n\r\n');
@@ -66,6 +107,8 @@ export class KernelDebugAdapter implements vscode.DebugAdapter {
     private cosmosProc?: ChildProcess;
     private gdbProc?: ChildProcess;
     private gdbBuffer = Buffer.alloc(0);
+    private qmp?: QmpClient;
+    private liveReaderRegistered = false;
     private launched = false;
     private terminated = false;
 
@@ -147,6 +190,7 @@ export class KernelDebugAdapter implements vscode.DebugAdapter {
 
         const arch = args.arch || projectInfo.arch;
         const gdbPort = args.gdbPort ?? 1234;
+        const qmpPort = args.qmpPort ?? 4444;
         const projectDir = projectInfo.projectDir;
         const csproj = projectInfo.csproj;
         const projectName = projectInfo.name;
@@ -195,6 +239,20 @@ export class KernelDebugAdapter implements vscode.DebugAdapter {
             // properties optional — keep going with defaults
         }
 
+        // Extra QEMU args after `--` are forwarded by the cosmos CLI. We
+        // open a QMP socket so the extension can read kernel memory while
+        // the guest is running — used for the live Kernel Threads view.
+        const qmpInUse = await isPortInUse(qmpPort);
+        this.outputChannel.appendLine(`[cosmos-debug] QMP port ${qmpPort} in use at start? ${qmpInUse}`);
+        if (!qmpInUse) {
+            cosmosArgs.push('--', '-qmp', `tcp:127.0.0.1:${qmpPort},server,nowait`);
+            this.outputChannel.appendLine(`[cosmos-debug] launching with -qmp tcp:127.0.0.1:${qmpPort},server,nowait`);
+        } else {
+            this.outputChannel.appendLine(
+                `[cosmos-debug] QMP port ${qmpPort} in use — live thread view disabled this session.`
+            );
+        }
+
         this.outputChannel.show(true);
         this.outputChannel.appendLine('');
         this.outputChannel.appendLine(`Debugging ${projectName} (${arch})`);
@@ -222,6 +280,43 @@ export class KernelDebugAdapter implements vscode.DebugAdapter {
         // Wait for QEMU's gdbstub to come up. Poll the port instead of a
         // fixed sleep so the attach happens as soon as it's ready.
         await this.waitForPort(gdbPort, 5000);
+
+        if (!qmpInUse) {
+            const qmp = new QmpClient('127.0.0.1', qmpPort);
+            try {
+                await this.waitForPort(qmpPort, 5000);
+                await qmp.connect(5000);
+                this.qmp = qmp;
+                this.outputChannel.appendLine(`[cosmos-debug] QMP connected on 127.0.0.1:${qmpPort}`);
+                const reader: LiveReader = {
+                    readVirtual: (vaddr, len) => qmp.readVirtual(vaddr, len)
+                };
+                // Resolve `s_buffer`'s static-storage address from the ELF
+                // up-front so the threads view never needs a gdb infcall.
+                // The NativeAOT mangled symbol for the class's non-GC
+                // statics block (s_buffer is the only field) gives us the
+                // exact location to QMP-read.
+                const staticsAddr = resolveSymbolAddress(
+                    elfPath,
+                    '__NONGCSTATICSCosmos_Kernel_Core_Cosmos_Kernel_Core_Runtime_DebugLiveSnapshot'
+                );
+                if (staticsAddr !== undefined) {
+                    reader.snapshotStaticsAddr = staticsAddr;
+                    this.outputChannel.appendLine(
+                        `[cosmos-debug] DebugLiveSnapshot statics at 0x${staticsAddr.toString(16)}`
+                    );
+                } else {
+                    this.outputChannel.appendLine(
+                        `[cosmos-debug] DebugLiveSnapshot symbol not found — falling back to gdb infcall.`
+                    );
+                }
+                registerLiveReader(reader);
+                this.liveReaderRegistered = true;
+            } catch (e: any) {
+                this.outputChannel.appendLine(`[cosmos-debug] QMP unavailable: ${e?.message || e}`);
+                qmp.dispose();
+            }
+        }
 
         // Pick a gdb with Python support if any candidate has it (needed for
         // the NativeAOT pretty-printers). Cosmos's bundled gdb is currently
@@ -419,6 +514,15 @@ export class KernelDebugAdapter implements vscode.DebugAdapter {
         }
         this.terminated = true;
         this.outputChannel.appendLine(`[cosmos-debug] shutdown (${reason})`);
+
+        if (this.liveReaderRegistered) {
+            unregisterLiveReader();
+            this.liveReaderRegistered = false;
+        }
+        if (this.qmp) {
+            try { this.qmp.dispose(); } catch { /* already gone */ }
+            this.qmp = undefined;
+        }
 
         if (this.gdbProc && !this.gdbProc.killed) {
             try { this.gdbProc.kill(); } catch { /* already gone */ }
