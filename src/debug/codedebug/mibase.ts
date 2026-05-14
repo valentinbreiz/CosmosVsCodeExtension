@@ -293,7 +293,12 @@ export class MI2DebugSession extends DebugSession {
 			}
 			this.sendResponse(response);
 		}).catch((error: MIError) => {
-			if (error.message === 'Selected thread is running.') {
+			// VS Code can ask for threads while the inferior is running (e.g.
+			// after a continue, when the debug pane refreshes). gdb refuses
+			// in two slightly different wordings; both are normal and should
+			// resolve to an empty thread list rather than an error toast.
+			const msg = (error && error.message) || '';
+			if (/thread is running/i.test(msg) || /target is running/i.test(msg)) {
 				this.sendResponse(response);
 				return;
 			}
