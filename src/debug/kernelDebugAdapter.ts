@@ -178,13 +178,15 @@ export class KernelDebugAdapter implements vscode.DebugAdapter {
             );
         }
 
-        // --headless is mandatory: the bundled QEMU's only graphical backend
-        // is SDL, which cannot open a window from the extension host on
-        // Wayland sessions, and would kill QEMU immediately on failure.
-        const cosmosArgs = ['run', '-a', arch, '--iso', isoPath, '--debug', '--headless'];
+        // Mirror `cosmos.run`'s --headless rule: respect the project's
+        // CosmosEnableGraphics setting. Headless only when graphics is off.
+        const cosmosArgs = ['run', '-a', arch, '--iso', isoPath, '--debug'];
         let props;
         try {
             props = parseProjectProperties(csproj);
+            if (!props.enableGraphics) {
+                cosmosArgs.push('--headless');
+            }
             const memoryMb = parseMemoryMb(props.qemu.memory);
             if (memoryMb !== null) {
                 cosmosArgs.push('-m', String(memoryMb));
