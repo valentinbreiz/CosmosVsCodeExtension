@@ -19,10 +19,16 @@ export async function debugCommand(arch?: string): Promise<void> {
     }
 
     const target = arch || projectInfo.arch;
-    await vscode.debug.startDebugging(workspaceFolder, {
+    const started = await vscode.debug.startDebugging(workspaceFolder, {
         name: `Debug ${target} Kernel`,
         type: 'cosmos-debug',
         request: 'launch',
         arch: target
     });
+    if (started) {
+        // Swing the sidebar to the built-in Run-and-Debug view so the user
+        // lands on Variables/Watch/Call Stack + the Cosmos Kernel Threads
+        // view, instead of staying on the Cosmos sidebar.
+        await vscode.commands.executeCommand('workbench.view.debug');
+    }
 }
