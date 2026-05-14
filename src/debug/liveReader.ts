@@ -12,6 +12,11 @@ export interface LiveReader {
      * `s_buffer` field). When set, views can skip the gdb infcall.
      */
     snapshotStaticsAddr?: bigint;
+    /**
+     * Same idea for DebugLiveGCSnapshot — first 8 bytes hold its
+     * `s_buffer` pointer.
+     */
+    gcSnapshotStaticsAddr?: bigint;
 }
 
 let active: LiveReader | undefined;

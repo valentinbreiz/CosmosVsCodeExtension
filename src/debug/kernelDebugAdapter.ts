@@ -310,6 +310,20 @@ export class KernelDebugAdapter implements vscode.DebugAdapter {
                         `[cosmos-debug] DebugLiveSnapshot symbol not found — falling back to gdb infcall.`
                     );
                 }
+                const gcStaticsAddr = resolveSymbolAddress(
+                    elfPath,
+                    '__NONGCSTATICSCosmos_Kernel_Core_Cosmos_Kernel_Core_Runtime_DebugLiveGCSnapshot'
+                );
+                if (gcStaticsAddr !== undefined) {
+                    reader.gcSnapshotStaticsAddr = gcStaticsAddr;
+                    this.outputChannel.appendLine(
+                        `[cosmos-debug] DebugLiveGCSnapshot statics at 0x${gcStaticsAddr.toString(16)}`
+                    );
+                } else {
+                    this.outputChannel.appendLine(
+                        `[cosmos-debug] DebugLiveGCSnapshot symbol not found — GC live view will be empty.`
+                    );
+                }
                 registerLiveReader(reader);
                 this.liveReaderRegistered = true;
             } catch (e: any) {

@@ -15,6 +15,7 @@ import { CosmosDebugConfigurationProvider, ensureLaunchJson } from './providers/
 import { CosmosTestController } from './testing/testController';
 import { KernelDebugAdapterFactory } from './debug/kernelDebugAdapter';
 import { KernelThreadsProvider, KernelThreadsTrackerFactory } from './views/kernelThreadsView';
+import { KernelGCProvider, KernelGCTrackerFactory } from './views/kernelGCView';
 import { getOutputChannel } from './utils/output';
 
 let projectTreeProvider: ProjectTreeProvider;
@@ -73,8 +74,12 @@ export function activate(context: vscode.ExtensionContext) {
     const kernelThreadsProvider = new KernelThreadsProvider();
     kernelThreadsProvider.setMessage('Start a Cosmos debug session to inspect kernel threads.');
     vscode.window.registerTreeDataProvider('cosmos.kernelThreads', kernelThreadsProvider);
+    const kernelGCProvider = new KernelGCProvider();
+    kernelGCProvider.setMessage('Start a Cosmos debug session to inspect GC state.');
+    vscode.window.registerTreeDataProvider('cosmos.kernelGC', kernelGCProvider);
     context.subscriptions.push(
         vscode.debug.registerDebugAdapterTrackerFactory('cosmos-debug', new KernelThreadsTrackerFactory(kernelThreadsProvider)),
+        vscode.debug.registerDebugAdapterTrackerFactory('cosmos-debug', new KernelGCTrackerFactory(kernelGCProvider)),
         vscode.commands.registerCommand('cosmos.kernelThreads.copy', async () => {
             const text = kernelThreadsProvider.serialize();
             await vscode.env.clipboard.writeText(text);
@@ -85,6 +90,14 @@ export function activate(context: vscode.ExtensionContext) {
             if (session && session.type === 'cosmos-debug') {
                 kernelThreadsProvider.refresh(session);
             }
+        }),
+        vscode.commands.registerCommand('cosmos.kernelGC.copy', async () => {
+            const text = kernelGCProvider.serialize();
+            await vscode.env.clipboard.writeText(text);
+            vscode.window.setStatusBarMessage('Kernel GC copied to clipboard', 2000);
+        }),
+        vscode.commands.registerCommand('cosmos.kernelGC.refresh', () => {
+            void kernelGCProvider.refresh();
         })
     );
 

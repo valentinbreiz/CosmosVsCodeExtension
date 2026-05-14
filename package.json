@@ -2,7 +2,7 @@
   "name": "cosmos-vscode",
   "displayName": "Cosmos OS Development",
   "description": "VS Code extension for Cosmos OS kernel development with NativeAOT",
-  "version": "1.4.6",
+  "version": "1.5.0",
   "publisher": "cosmosos",
   "repository": {
     "type": "git",
@@ -112,6 +112,11 @@
           "id": "cosmos.kernelThreads",
           "name": "Cosmos Kernel Threads",
           "when": "cosmos:isCosmosProject"
+        },
+        {
+          "id": "cosmos.kernelGC",
+          "name": "Cosmos Kernel GC",
+          "when": "cosmos:isCosmosProject"
         }
       ]
     },
@@ -187,6 +192,18 @@
         "title": "Refresh Kernel Threads",
         "icon": "$(refresh)",
         "category": "Cosmos"
+      },
+      {
+        "command": "cosmos.kernelGC.copy",
+        "title": "Copy Kernel GC",
+        "icon": "$(copy)",
+        "category": "Cosmos"
+      },
+      {
+        "command": "cosmos.kernelGC.refresh",
+        "title": "Refresh Kernel GC",
+        "icon": "$(refresh)",
+        "category": "Cosmos"
       }
     ],
     "menus": {
@@ -204,6 +221,16 @@
         {
           "command": "cosmos.kernelThreads.copy",
           "when": "view == cosmos.kernelThreads",
+          "group": "navigation@2"
+        },
+        {
+          "command": "cosmos.kernelGC.refresh",
+          "when": "view == cosmos.kernelGC",
+          "group": "navigation@1"
+        },
+        {
+          "command": "cosmos.kernelGC.copy",
+          "when": "view == cosmos.kernelGC",
           "group": "navigation@2"
         }
       ],
