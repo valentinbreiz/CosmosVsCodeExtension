@@ -2,7 +2,7 @@
   "name": "cosmos-vscode",
   "displayName": "Cosmos OS Development",
   "description": "VS Code extension for Cosmos OS kernel development with NativeAOT",
-  "version": "1.0.7",
+  "version": "1.1.0",
   "publisher": "cosmosos",
   "repository": {
     "type": "git",
@@ -29,9 +29,6 @@
     "workspaceContains:**/*.csproj"
   ],
   "main": "./out/extension.js",
-  "extensionDependencies": [
-    "ms-vscode.cpptools"
-  ],
   "contributes": {
     "debuggers": [
       {
@@ -195,7 +192,10 @@
         "cosmos.defaultArchitecture": {
           "type": "string",
           "default": "x64",
-          "enum": ["x64", "arm64"],
+          "enum": [
+            "x64",
+            "arm64"
+          ],
           "description": "Default target architecture for kernel builds"
         },
         "cosmos.qemuMemory": {
@@ -206,7 +206,10 @@
         "cosmos.testMode": {
           "type": "string",
           "default": "ci",
-          "enum": ["ci", "dev"],
+          "enum": [
+            "ci",
+            "dev"
+          ],
           "enumDescriptions": [
             "Headless QEMU (faster, no display)",
             "Visual QEMU window (slower, useful for inspecting)"
@@ -224,16 +227,18 @@
     "package": "vsce package"
   },
   "dependencies": {
-    "glob": "^10.3.0"
+    "glob": "^10.3.0",
+    "vscode-debugadapter": "^1.51.0",
+    "vscode-debugprotocol": "^1.51.0"
   },
   "devDependencies": {
+    "@types/glob": "^8.1.0",
     "@types/node": "^20.10.0",
     "@types/vscode": "^1.85.0",
-    "@types/glob": "^8.1.0",
     "@typescript-eslint/eslint-plugin": "^6.13.0",
     "@typescript-eslint/parser": "^6.13.0",
+    "@vscode/vsce": "^2.22.0",
     "eslint": "^8.54.0",
-    "typescript": "^5.3.0",
-    "@vscode/vsce": "^2.22.0"
+    "typescript": "^5.3.0"
   }
 }

@@ -230,7 +230,7 @@ export class CosmosTestController implements vscode.Disposable {
             const ok = await debugTestKernel(target.kernel.projectDir, arch);
             if (ok) {
                 run.appendOutput('Debug session attached. End the session to finish the run.\r\n');
-                // Wait for either the cppdbg session to end or cancellation.
+                // Wait for either the cosmos-gdb session to end or cancellation.
                 await new Promise<void>(resolve => {
                     const sub = vscode.debug.onDidTerminateDebugSession(session => {
                         if (session.name.startsWith(`Cosmos Test Debug ${target.kernel.suiteName}`)) {
