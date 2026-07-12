@@ -82,6 +82,15 @@ export function getProjectInfo(): { name: string; arch: string; csproj: string }
     return null;
 }
 
+export interface DiskConfig {
+    // Image path, absolute or relative to the project directory.
+    path: string;
+    // Controller the guest sees the disk through.
+    type: 'ahci' | 'nvme';
+    // Size used only when the image has to be created (e.g. "256M", "1G").
+    size: string;
+}
+
 export interface QemuConfig {
     memory: string;
     machineType: string;
@@ -89,7 +98,15 @@ export interface QemuConfig {
     enableNetwork: boolean;
     networkPorts: string;
     serialMode: string;
+    // QEMU NIC model exposed to the guest, or 'none' for no network card.
+    networkCard: string;
+    // Keyboard device: 'ps2' (x64 chipset), 'virtio-keyboard-device' (arm64), or 'none'.
+    keyboard: string;
+    // Mouse device: 'ps2' (x64 chipset), 'virtio-mouse-device' (arm64), or 'none'.
+    mouse: string;
     extraArgs: string;
+    // Disk images attached to the kernel at boot. Empty by default.
+    disks: DiskConfig[];
 }
 
 export interface ProjectProperties {
@@ -117,7 +134,12 @@ export function getDefaultQemuConfig(arch: string): QemuConfig {
         enableNetwork: false,
         networkPorts: '5555',
         serialMode: 'stdio',
-        extraArgs: ''
+        networkCard: 'none',
+        // x64 gets PS/2 from the chipset; arm64 virt needs virtio-input devices.
+        keyboard: arch === 'arm64' ? 'virtio-keyboard-device' : 'ps2',
+        mouse: arch === 'arm64' ? 'virtio-mouse-device' : 'ps2',
+        extraArgs: '',
+        disks: []
     };
 }
 
@@ -133,11 +155,38 @@ export function loadQemuConfig(projectDir: string, arch: string): QemuConfig {
     const x64CpuModels = ['max', 'qemu64', 'host'];
     const arm64CpuModels = ['cortex-a72', 'cortex-a53', 'max'];
 
+    // NIC models with a kernel driver, per architecture ('none' = no card).
+    // The kernel only ships E1000E (x64) and VirtioNet (arm64), so anything
+    // else is rejected back to 'none' rather than persisted.
+    const x64NetworkCards = ['none', 'e1000e'];
+    const arm64NetworkCards = ['none', 'virtio-net-device'];
+
+    // Input devices with a kernel driver, per architecture. x64 has PS/2
+    // (i8042) drivers; arm64 virt has no PS/2 controller and uses virtio-input.
+    const x64Keyboards = ['ps2', 'none'];
+    const arm64Keyboards = ['virtio-keyboard-device', 'none'];
+    const x64Mice = ['ps2', 'none'];
+    const arm64Mice = ['virtio-mouse-device', 'none'];
+
     try {
         if (fs.existsSync(configPath)) {
             const content = fs.readFileSync(configPath, 'utf8');
             const config = JSON.parse(content);
             const merged = { ...defaults, ...config.qemu };
+
+            // Disks may be absent or malformed in older configs; normalize to a
+            // clean array so consumers never have to defend against it.
+            if (!Array.isArray(merged.disks)) {
+                merged.disks = [];
+            } else {
+                merged.disks = merged.disks
+                    .filter((d: any) => d && typeof d.path === 'string')
+                    .map((d: any) => ({
+                        path: d.path,
+                        type: d.type === 'nvme' ? 'nvme' : 'ahci',
+                        size: typeof d.size === 'string' && d.size.trim() ? d.size : '256M'
+                    }));
+            }
 
             // Validate machine type matches architecture
             if (arch === 'arm64') {
@@ -147,12 +196,30 @@ export function loadQemuConfig(projectDir: string, arch: string): QemuConfig {
                 if (!arm64CpuModels.includes(merged.cpuModel)) {
                     merged.cpuModel = defaults.cpuModel;
                 }
+                if (!arm64NetworkCards.includes(merged.networkCard)) {
+                    merged.networkCard = defaults.networkCard;
+                }
+                if (!arm64Keyboards.includes(merged.keyboard)) {
+                    merged.keyboard = defaults.keyboard;
+                }
+                if (!arm64Mice.includes(merged.mouse)) {
+                    merged.mouse = defaults.mouse;
+                }
             } else {
                 if (!x64MachineTypes.includes(merged.machineType)) {
                     merged.machineType = defaults.machineType;
                 }
                 if (!x64CpuModels.includes(merged.cpuModel)) {
                     merged.cpuModel = defaults.cpuModel;
+                }
+                if (!x64NetworkCards.includes(merged.networkCard)) {
+                    merged.networkCard = defaults.networkCard;
+                }
+                if (!x64Keyboards.includes(merged.keyboard)) {
+                    merged.keyboard = defaults.keyboard;
+                }
+                if (!x64Mice.includes(merged.mouse)) {
+                    merged.mouse = defaults.mouse;
                 }
             }
 

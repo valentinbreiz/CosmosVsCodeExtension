@@ -24,6 +24,11 @@ export function showProjectProperties(context: vscode.ExtensionContext, projectT
 
     panel.webview.html = getPropertiesWebviewContent(props, projectInfo.csproj);
 
+    // The arch drives which Machine Type / CPU Model / Network Card options the
+    // page renders. Those are baked into the HTML at generation time, so a switch
+    // has to re-render the panel — tracked here to only do so when it changes.
+    let currentArch = props.targetArch;
+
     panel.webview.onDidReceiveMessage(
         message => {
             switch (message.command) {
@@ -32,6 +37,13 @@ export function showProjectProperties(context: vscode.ExtensionContext, projectT
                         saveProjectProperties(projectInfo.csproj, message.properties);
                         vscode.window.showInformationMessage('Project properties saved successfully');
                         projectTreeProvider.refresh();
+                        if (message.properties?.targetArch && message.properties.targetArch !== currentArch) {
+                            currentArch = message.properties.targetArch;
+                            // Re-parse so the arch-dependent dropdowns (and any
+                            // values validated against the new arch) refresh.
+                            const refreshed = parseProjectProperties(projectInfo.csproj);
+                            panel.webview.html = getPropertiesWebviewContent(refreshed, projectInfo.csproj);
+                        }
                     } catch (error: any) {
                         vscode.window.showErrorMessage(`Failed to save: ${error.message}`);
                     }
@@ -132,13 +144,43 @@ function getPropertiesWebviewContent(props: ProjectProperties, csprojPath: strin
         .section-content {
             overflow: hidden;
             transition: max-height 0.3s ease, opacity 0.2s ease;
-            max-height: 1000px;
+            /* Upper bound for the collapse animation. Must exceed the tallest
+               section (QEMU Configuration, ~9 fields each with a description) or
+               the overflow clips it and the next section rides up over the tail. */
+            max-height: 3000px;
             opacity: 1;
         }
         .section.collapsed .section-content {
             max-height: 0;
             opacity: 0;
             margin-bottom: -16px;
+        }
+        .qemu-columns {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+            gap: 16px;
+            margin-bottom: 16px;
+        }
+        .qemu-group {
+            border: 1px solid var(--vscode-widget-border, rgba(128,128,128,0.18));
+            border-radius: 10px;
+            padding: 16px;
+            background: var(--vscode-editorWidget-background, rgba(127,127,127,0.05));
+            margin-bottom: 16px;
+        }
+        .qemu-columns .qemu-group {
+            margin-bottom: 0;
+        }
+        .qemu-group > .field:last-child {
+            margin-bottom: 0;
+        }
+        .qemu-group-title {
+            font-size: 11px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            color: var(--vscode-descriptionForeground);
+            margin-bottom: 14px;
         }
         .field {
             margin-bottom: 20px;
@@ -175,6 +217,54 @@ function getPropertiesWebviewContent(props: ProjectProperties, csprojPath: strin
             font-size: 12px;
             color: var(--vscode-descriptionForeground);
             margin-top: 6px;
+        }
+        .disk-row {
+            display: flex;
+            gap: 8px;
+            align-items: center;
+            margin-bottom: 8px;
+        }
+        .disk-row .disk-path {
+            flex: 1 1 auto;
+        }
+        .disk-row .disk-type {
+            flex: 0 0 96px;
+        }
+        .disk-row .disk-size {
+            flex: 0 0 84px;
+        }
+        .disk-remove {
+            flex: 0 0 auto;
+            background: transparent;
+            border: none;
+            color: var(--vscode-descriptionForeground);
+            cursor: pointer;
+            font-size: 15px;
+            line-height: 1;
+            padding: 6px 8px;
+            border-radius: 6px;
+        }
+        .disk-remove:hover {
+            color: var(--vscode-errorForeground);
+            background: var(--vscode-toolbar-hoverBackground, rgba(128,128,128,0.15));
+        }
+        .add-disk-btn {
+            margin-top: 4px;
+            background: var(--vscode-button-secondaryBackground, transparent);
+            color: var(--vscode-button-secondaryForeground, var(--vscode-foreground));
+            border: 1px solid var(--vscode-input-border, rgba(128,128,128,0.3));
+            padding: 6px 12px;
+            font-size: 13px;
+            border-radius: 6px;
+            cursor: pointer;
+        }
+        .add-disk-btn:hover {
+            background: var(--vscode-button-secondaryHoverBackground, rgba(128,128,128,0.15));
+        }
+        .disk-empty {
+            font-size: 12px;
+            color: var(--vscode-descriptionForeground);
+            margin-bottom: 8px;
         }
         .toggle-field {
             display: flex;
@@ -434,6 +524,10 @@ function getPropertiesWebviewContent(props: ProjectProperties, csprojPath: strin
             <div class="section-title" onclick="toggleSection('section-qemu')"><span>QEMU Configuration</span><span class="chevron">▼</span></div>
             <div class="section-content">
 
+            <div class="qemu-columns">
+            <div class="qemu-group">
+            <div class="qemu-group-title">Machine</div>
+
             <div class="field">
                 <label class="field-label">Memory</label>
                 <select id="qemuMemory" class="field-input">
@@ -443,6 +537,7 @@ function getPropertiesWebviewContent(props: ProjectProperties, csprojPath: strin
                     <option value="2G" ${props.qemu.memory === '2G' ? 'selected' : ''}>2 GB</option>
                     <option value="4G" ${props.qemu.memory === '4G' ? 'selected' : ''}>4 GB</option>
                 </select>
+                <div class="field-hint">How much RAM the virtual machine gives your kernel. More lets the kernel allocate more, but uses more host memory.</div>
             </div>
 
             <div class="field">
@@ -455,6 +550,7 @@ function getPropertiesWebviewContent(props: ProjectProperties, csprojPath: strin
                         <option value="virt" ${props.qemu.machineType === 'virt' ? 'selected' : ''}>Virt (ARM Virtual Machine)</option>
                     `}
                 </select>
+                <div class="field-hint">The emulated motherboard/chipset that decides which built-in devices exist. ${props.targetArch === 'x64' ? 'Q35 is the modern default; PC is the legacy i440FX.' : 'arm64 uses the generic ARM virt machine.'}</div>
             </div>
 
             <div class="field">
@@ -470,6 +566,7 @@ function getPropertiesWebviewContent(props: ProjectProperties, csprojPath: strin
                         <option value="max" ${props.qemu.cpuModel === 'max' ? 'selected' : ''}>Max (All features)</option>
                     `}
                 </select>
+                <div class="field-hint">Which processor QEMU emulates for the guest. ${props.targetArch === 'x64' ? '&quot;Max&quot; exposes every CPU feature QEMU supports; &quot;Host&quot; passes your real CPU through (fastest, needs KVM).' : 'Cortex-A72/A53 are common ARM cores; &quot;Max&quot; enables all features.'}</div>
             </div>
 
             <div class="field">
@@ -478,29 +575,81 @@ function getPropertiesWebviewContent(props: ProjectProperties, csprojPath: strin
                     <option value="stdio" ${props.qemu.serialMode === 'stdio' ? 'selected' : ''}>Standard I/O (Output panel)</option>
                     <option value="none" ${props.qemu.serialMode === 'none' ? 'selected' : ''}>Disabled</option>
                 </select>
+                <div class="field-hint">Where the kernel's serial console goes — the text from Console.Write / Serial output. &quot;Standard I/O&quot; streams it into the VS Code Output panel.</div>
+            </div>
             </div>
 
-            <div class="toggle-field">
-                <div class="toggle-info">
-                    <div class="toggle-label">Network Support</div>
-                    <div class="toggle-hint">Enable E1000 network card with user-mode networking</div>
-                </div>
-                <label class="toggle-switch">
-                    <input type="checkbox" id="qemuEnableNetwork" ${props.qemu.enableNetwork ? 'checked' : ''}>
-                    <span class="toggle-slider"></span>
-                </label>
+            <div class="qemu-group">
+            <div class="qemu-group-title">Devices</div>
+
+            <div class="field">
+                <label class="field-label">Network Card</label>
+                <select id="qemuNetworkCard" class="field-input">
+                    <option value="none" ${props.qemu.networkCard === 'none' ? 'selected' : ''}>None (no network card)</option>
+                    ${props.targetArch === 'x64' ? `
+                        <option value="e1000e" ${props.qemu.networkCard === 'e1000e' ? 'selected' : ''}>Intel E1000E (PCIe)</option>
+                        <option value="e1000" disabled>Intel E1000 — no driver</option>
+                        <option value="rtl8139" disabled>Realtek RTL8139 — no driver</option>
+                        <option value="virtio-net-pci" disabled>VirtIO (virtio-net-pci) — no driver</option>
+                    ` : `
+                        <option value="virtio-net-device" ${props.qemu.networkCard === 'virtio-net-device' ? 'selected' : ''}>VirtIO (virtio-net-device)</option>
+                        <option value="e1000e" disabled>Intel E1000E — x64 only</option>
+                    `}
+                </select>
+                <div class="field-hint">The network adapter the kernel sees. Pick &quot;None&quot; for no networking; cards without a kernel driver are grayed out. Supported: ${props.targetArch === 'x64' ? 'Intel E1000E' : 'VirtIO (virtio-net-device)'}.</div>
             </div>
 
-            <div class="field" id="networkPortsField" style="margin-top: 16px; ${props.qemu.enableNetwork ? '' : 'display: none;'}">
-                <label class="field-label">Port Forwards (UDP)</label>
-                <input type="text" id="qemuNetworkPorts" class="field-input" value="${props.qemu.networkPorts}" placeholder="5555,5556">
-                <div class="field-hint">Comma-separated ports forwarded from host to guest</div>
+            <div class="field">
+                <label class="field-label">Keyboard</label>
+                <select id="qemuKeyboard" class="field-input">
+                    <option value="none" ${props.qemu.keyboard === 'none' ? 'selected' : ''}>None (no keyboard)</option>
+                    ${props.targetArch === 'x64' ? `
+                        <option value="ps2" ${props.qemu.keyboard === 'ps2' ? 'selected' : ''}>PS/2 (i8042)</option>
+                        <option value="virtio-keyboard-device" disabled>VirtIO Keyboard — x64 has no driver</option>
+                    ` : `
+                        <option value="virtio-keyboard-device" ${props.qemu.keyboard === 'virtio-keyboard-device' ? 'selected' : ''}>VirtIO Keyboard</option>
+                        <option value="ps2" disabled>PS/2 — virt has no i8042</option>
+                    `}
+                </select>
+                <div class="field-hint">The keyboard device the kernel reads input from. Devices without a kernel driver are grayed out. Supported: ${props.targetArch === 'x64' ? 'PS/2 (built into the q35 chipset)' : 'VirtIO (the arm64 virt machine has no PS/2)'}.</div>
             </div>
 
-            <div class="field" style="margin-top: 16px;">
+            <div class="field">
+                <label class="field-label">Mouse</label>
+                <select id="qemuMouse" class="field-input">
+                    <option value="none" ${props.qemu.mouse === 'none' ? 'selected' : ''}>None (no mouse)</option>
+                    ${props.targetArch === 'x64' ? `
+                        <option value="ps2" ${props.qemu.mouse === 'ps2' ? 'selected' : ''}>PS/2 (i8042)</option>
+                        <option value="virtio-mouse-device" disabled>VirtIO Mouse — x64 has no driver</option>
+                    ` : `
+                        <option value="virtio-mouse-device" ${props.qemu.mouse === 'virtio-mouse-device' ? 'selected' : ''}>VirtIO Mouse</option>
+                        <option value="ps2" disabled>PS/2 — virt has no i8042</option>
+                    `}
+                </select>
+                <div class="field-hint">The pointing device the kernel reads. Devices without a kernel driver are grayed out. Supported: ${props.targetArch === 'x64' ? 'PS/2 (built into the q35 chipset)' : 'VirtIO (the arm64 virt machine has no PS/2)'}.</div>
+            </div>
+            </div>
+            </div>
+
+            <div class="qemu-group">
+            <div class="qemu-group-title">Storage</div>
+
+            <div class="field">
+                <label class="field-label">Disks</label>
+                <div class="field-hint" style="margin-top:0; margin-bottom:10px;">Disk images attached to the kernel at boot. A missing image is created at the given size on launch. Paths are relative to the project folder.</div>
+                <div id="diskList"></div>
+                <button type="button" class="add-disk-btn" onclick="addDisk()">+ Add Disk</button>
+            </div>
+            </div>
+
+            <div class="qemu-group">
+            <div class="qemu-group-title">Advanced</div>
+
+            <div class="field">
                 <label class="field-label">Extra Arguments</label>
                 <input type="text" id="qemuExtraArgs" class="field-input" value="${props.qemu.extraArgs}" placeholder="-device ich9-ahci">
-                <div class="field-hint">Additional QEMU command line arguments</div>
+                <div class="field-hint">Raw flags appended to the QEMU launch command, for advanced options not covered above (e.g. <code>-device …</code>). Leave empty if unsure.</div>
+            </div>
             </div>
             </div>
         </div>
@@ -553,12 +702,83 @@ function getPropertiesWebviewContent(props: ProjectProperties, csprojPath: strin
                 machineType: document.getElementById('qemuMachineType').value,
                 cpuModel: document.getElementById('qemuCpuModel').value,
                 serialMode: document.getElementById('qemuSerialMode').value,
-                enableNetwork: document.getElementById('qemuEnableNetwork').checked,
-                networkPorts: document.getElementById('qemuNetworkPorts').value,
-                extraArgs: document.getElementById('qemuExtraArgs').value
+                networkCard: document.getElementById('qemuNetworkCard').value,
+                keyboard: document.getElementById('qemuKeyboard').value,
+                mouse: document.getElementById('qemuMouse').value,
+                // Legacy network toggle/ports are no longer editable in this panel;
+                // preserve whatever the project already had so saving doesn't wipe it.
+                enableNetwork: ${props.qemu.enableNetwork},
+                networkPorts: ${JSON.stringify(props.qemu.networkPorts)},
+                extraArgs: document.getElementById('qemuExtraArgs').value,
+                // Persist only rows that name a path; blank rows are UI scratch.
+                disks: disks.filter(d => d.path && d.path.trim()).map(d => ({
+                    path: d.path.trim(),
+                    type: d.type === 'nvme' ? 'nvme' : 'ahci',
+                    size: (d.size && d.size.trim()) ? d.size.trim() : '256M'
+                }))
             };
             vscode.postMessage({ command: 'saveQemu', qemu });
             showSaveStatus('Saved');
+        }
+
+        // Disks are edited as an in-memory list and re-rendered on every change,
+        // so indices stay stable across add/remove without per-row DOM surgery.
+        let disks = ${JSON.stringify(props.qemu.disks || [])};
+
+        function escapeAttr(s) {
+            return String(s == null ? '' : s)
+                .replace(/&/g, '&amp;').replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+        }
+
+        function renderDisks() {
+            const container = document.getElementById('diskList');
+            container.innerHTML = '';
+            if (disks.length === 0) {
+                const empty = document.createElement('div');
+                empty.className = 'disk-empty';
+                empty.textContent = 'No disks attached.';
+                container.appendChild(empty);
+            }
+            disks.forEach((d, i) => {
+                const row = document.createElement('div');
+                row.className = 'disk-row';
+                row.innerHTML =
+                    '<input type="text" class="field-input disk-path" placeholder="disk.img" ' +
+                        'value="' + escapeAttr(d.path) + '" data-i="' + i + '" data-k="path">' +
+                    '<select class="field-input disk-type" data-i="' + i + '" data-k="type">' +
+                        '<option value="ahci"' + (d.type === 'ahci' ? ' selected' : '') + '>AHCI</option>' +
+                        '<option value="nvme"' + (d.type === 'nvme' ? ' selected' : '') + '>NVMe</option>' +
+                    '</select>' +
+                    '<input type="text" class="field-input disk-size" placeholder="256M" ' +
+                        'value="' + escapeAttr(d.size) + '" data-i="' + i + '" data-k="size">' +
+                    '<button type="button" class="disk-remove" title="Remove disk" data-i="' + i + '">✕</button>';
+                container.appendChild(row);
+            });
+            container.querySelectorAll('.disk-path, .disk-size').forEach(function (el) {
+                el.addEventListener('input', onDiskFieldChange);
+            });
+            container.querySelectorAll('.disk-type').forEach(function (el) {
+                el.addEventListener('change', onDiskFieldChange);
+            });
+            container.querySelectorAll('.disk-remove').forEach(function (el) {
+                el.addEventListener('click', function () {
+                    disks.splice(parseInt(el.dataset.i, 10), 1);
+                    renderDisks();
+                    saveQemu();
+                });
+            });
+        }
+
+        function onDiskFieldChange(e) {
+            const el = e.target;
+            disks[parseInt(el.dataset.i, 10)][el.dataset.k] = el.value;
+            onQemuInputChange();
+        }
+
+        function addDisk() {
+            disks.push({ path: '', type: 'ahci', size: '256M' });
+            renderDisks();
         }
 
         function showSaveStatus(text) {
@@ -610,13 +830,13 @@ function getPropertiesWebviewContent(props: ProjectProperties, csprojPath: strin
         document.getElementById('qemuMachineType').addEventListener('change', saveQemu);
         document.getElementById('qemuCpuModel').addEventListener('change', saveQemu);
         document.getElementById('qemuSerialMode').addEventListener('change', saveQemu);
-        document.getElementById('qemuEnableNetwork').addEventListener('change', function() {
-            const portsField = document.getElementById('networkPortsField');
-            portsField.style.display = this.checked ? 'block' : 'none';
-            saveQemu();
-        });
-        document.getElementById('qemuNetworkPorts').addEventListener('input', onQemuInputChange);
+        document.getElementById('qemuNetworkCard').addEventListener('change', saveQemu);
+        document.getElementById('qemuKeyboard').addEventListener('change', saveQemu);
+        document.getElementById('qemuMouse').addEventListener('change', saveQemu);
         document.getElementById('qemuExtraArgs').addEventListener('input', onQemuInputChange);
+
+        // Render the disk list from the loaded config.
+        renderDisks();
 
         function openCsproj() {
             vscode.postMessage({ command: 'openCsproj' });

@@ -9,7 +9,7 @@ import { getOutputChannel } from '../utils/output';
 import { buildCommand } from './build';
 import { runDebugAdapterFactory } from '../extension';
 import { LogProcessor } from '../utils/logProcessor';
-import { parseMemoryMb } from '../utils/qemuOptions';
+import { parseMemoryMb, prepareDiskArgs, buildNicArgs, buildInputArgs } from '../utils/qemuOptions';
 
 export async function runCommand(arch?: string) {
     const outputChannel = getOutputChannel();
@@ -61,6 +61,14 @@ export async function runCommand(arch?: string) {
     const memoryMb = parseMemoryMb(props.qemu.memory);
     if (memoryMb !== null) {
         cosmosArgs.push('-m', String(memoryMb));
+    }
+    cosmosArgs.push(...buildNicArgs(props.qemu.networkCard));
+    cosmosArgs.push(...buildInputArgs(props.qemu.keyboard, props.qemu.mouse));
+    try {
+        cosmosArgs.push(...prepareDiskArgs(projectDir, props.qemu.disks, (m) => outputChannel.appendLine(m)));
+    } catch (err: any) {
+        vscode.window.showErrorMessage(`Failed to prepare disk image: ${err.message}`);
+        return;
     }
 
     outputChannel.show(true);
