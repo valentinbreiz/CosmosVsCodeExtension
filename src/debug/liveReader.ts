@@ -17,6 +17,10 @@ export interface LiveReader {
      * `s_buffer` pointer.
      */
     gcSnapshotStaticsAddr?: bigint;
+    /**
+     * Same idea for DebugLiveMemorySnapshot (page allocator / RAT).
+     */
+    memorySnapshotStaticsAddr?: bigint;
 }
 
 let active: LiveReader | undefined;

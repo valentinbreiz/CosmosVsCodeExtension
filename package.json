@@ -2,7 +2,7 @@
   "name": "cosmos-vscode",
   "displayName": "Cosmos OS Development",
   "description": "VS Code extension for Cosmos OS kernel development with NativeAOT",
-  "version": "1.5.0",
+  "version": "1.7.9",
   "publisher": "cosmosos",
   "repository": {
     "type": "git",
@@ -117,6 +117,17 @@
           "id": "cosmos.kernelGC",
           "name": "Cosmos Kernel GC",
           "when": "cosmos:isCosmosProject"
+        },
+        {
+          "id": "cosmos.kernelMemory",
+          "name": "Cosmos Kernel Memory",
+          "when": "cosmos:isCosmosProject"
+        },
+        {
+          "id": "cosmos.kernelMemoryMap",
+          "name": "Cosmos Kernel Memory Map",
+          "type": "webview",
+          "when": "cosmos:isCosmosProject"
         }
       ]
     },
@@ -204,6 +215,18 @@
         "title": "Refresh Kernel GC",
         "icon": "$(refresh)",
         "category": "Cosmos"
+      },
+      {
+        "command": "cosmos.kernelMemory.copy",
+        "title": "Copy Kernel Memory",
+        "icon": "$(copy)",
+        "category": "Cosmos"
+      },
+      {
+        "command": "cosmos.kernelMemory.refresh",
+        "title": "Refresh Kernel Memory",
+        "icon": "$(refresh)",
+        "category": "Cosmos"
       }
     ],
     "menus": {
@@ -231,6 +254,16 @@
         {
           "command": "cosmos.kernelGC.copy",
           "when": "view == cosmos.kernelGC",
+          "group": "navigation@2"
+        },
+        {
+          "command": "cosmos.kernelMemory.refresh",
+          "when": "view == cosmos.kernelMemory",
+          "group": "navigation@1"
+        },
+        {
+          "command": "cosmos.kernelMemory.copy",
+          "when": "view == cosmos.kernelMemory",
           "group": "navigation@2"
         }
       ],

@@ -324,6 +324,20 @@ export class KernelDebugAdapter implements vscode.DebugAdapter {
                         `[cosmos-debug] DebugLiveGCSnapshot symbol not found — GC live view will be empty.`
                     );
                 }
+                const memStaticsAddr = resolveSymbolAddress(
+                    elfPath,
+                    '__NONGCSTATICSCosmos_Kernel_Core_Cosmos_Kernel_Core_Runtime_DebugLiveMemorySnapshot'
+                );
+                if (memStaticsAddr !== undefined) {
+                    reader.memorySnapshotStaticsAddr = memStaticsAddr;
+                    this.outputChannel.appendLine(
+                        `[cosmos-debug] DebugLiveMemorySnapshot statics at 0x${memStaticsAddr.toString(16)}`
+                    );
+                } else {
+                    this.outputChannel.appendLine(
+                        `[cosmos-debug] DebugLiveMemorySnapshot symbol not found — memory live view will be empty.`
+                    );
+                }
                 registerLiveReader(reader);
                 this.liveReaderRegistered = true;
             } catch (e: any) {

@@ -16,6 +16,8 @@ import { CosmosTestController } from './testing/testController';
 import { KernelDebugAdapterFactory } from './debug/kernelDebugAdapter';
 import { KernelThreadsProvider, KernelThreadsTrackerFactory } from './views/kernelThreadsView';
 import { KernelGCProvider, KernelGCTrackerFactory } from './views/kernelGCView';
+import { KernelMemoryProvider, KernelMemoryTrackerFactory } from './views/kernelMemoryView';
+import { KernelMemoryMapViewProvider } from './views/kernelMemoryMapView';
 import { getOutputChannel } from './utils/output';
 
 let projectTreeProvider: ProjectTreeProvider;
@@ -77,9 +79,17 @@ export function activate(context: vscode.ExtensionContext) {
     const kernelGCProvider = new KernelGCProvider();
     kernelGCProvider.setMessage('Start a Cosmos debug session to inspect GC state.');
     vscode.window.registerTreeDataProvider('cosmos.kernelGC', kernelGCProvider);
+    const kernelMemoryProvider = new KernelMemoryProvider();
+    kernelMemoryProvider.setMessage('Start a Cosmos debug session to inspect memory manager state.');
+    vscode.window.registerTreeDataProvider('cosmos.kernelMemory', kernelMemoryProvider);
+    const kernelMemoryView = new KernelMemoryMapViewProvider(context.extensionUri, kernelMemoryProvider);
+    context.subscriptions.push(
+        vscode.window.registerWebviewViewProvider(KernelMemoryMapViewProvider.viewType, kernelMemoryView)
+    );
     context.subscriptions.push(
         vscode.debug.registerDebugAdapterTrackerFactory('cosmos-debug', new KernelThreadsTrackerFactory(kernelThreadsProvider)),
         vscode.debug.registerDebugAdapterTrackerFactory('cosmos-debug', new KernelGCTrackerFactory(kernelGCProvider)),
+        vscode.debug.registerDebugAdapterTrackerFactory('cosmos-debug', new KernelMemoryTrackerFactory(kernelMemoryProvider)),
         vscode.commands.registerCommand('cosmos.kernelThreads.copy', async () => {
             const text = kernelThreadsProvider.serialize();
             await vscode.env.clipboard.writeText(text);
@@ -98,6 +108,14 @@ export function activate(context: vscode.ExtensionContext) {
         }),
         vscode.commands.registerCommand('cosmos.kernelGC.refresh', () => {
             void kernelGCProvider.refresh();
+        }),
+        vscode.commands.registerCommand('cosmos.kernelMemory.copy', async () => {
+            const text = kernelMemoryProvider.serialize();
+            await vscode.env.clipboard.writeText(text);
+            vscode.window.setStatusBarMessage('Kernel Memory copied to clipboard', 2000);
+        }),
+        vscode.commands.registerCommand('cosmos.kernelMemory.refresh', () => {
+            void kernelMemoryProvider.refresh();
         })
     );
 
