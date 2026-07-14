@@ -37,6 +37,17 @@ export function parseSizeBytes(s: string): number | null {
     return n;
 }
 
+// Build the `cosmos run --cpu <model>` argument from the configured CPU model
+// (properties page: Max / QEMU64 / Host on x64). An empty/absent value yields
+// no args, letting the launcher pick its default (host under KVM, max under
+// TCG on x64; cortex-a72 on arm64).
+export function buildCpuArgs(cpuModel: string | undefined): string[] {
+    if (!cpuModel || !cpuModel.trim()) {
+        return [];
+    }
+    return ['--cpu', cpuModel.trim()];
+}
+
 // Build the `cosmos run --nic <model>` argument from the configured card.
 // 'none' is passed through explicitly so QEMU's default NIC is disabled — the
 // whole point of the selector. An empty/absent value yields no args, leaving
