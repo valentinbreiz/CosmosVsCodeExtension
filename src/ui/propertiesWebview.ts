@@ -434,7 +434,7 @@ function getPropertiesWebviewContent(props: ProjectProperties, csprojPath: strin
             <div class="toggle-field">
                 <div class="toggle-info">
                     <div class="toggle-label">Interrupts</div>
-                    <div class="toggle-hint">Interrupt support, disabling also disables Timer, Keyboard, Mouse, Network, Scheduler, Graphics</div>
+                    <div class="toggle-hint">Interrupt support, disabling also disables Timer, Keyboard, Mouse, Network, Scheduler, PCI, Storage</div>
                 </div>
                 <label class="toggle-switch">
                     <input type="checkbox" id="enableInterrupts" ${props.enableInterrupts ? 'checked' : ''}>
@@ -497,13 +497,57 @@ function getPropertiesWebviewContent(props: ProjectProperties, csprojPath: strin
                 </label>
             </div>
 
-            <div class="toggle-field toggle-child" id="field-graphics">
+            <div class="toggle-field toggle-child" id="field-pci">
+                <div class="toggle-info">
+                    <div class="toggle-label">PCI Support</div>
+                    <div class="toggle-hint">PCI/PCIe bus enumeration. Every PCI device driver needs it — E1000E, AHCI, NVMe, and VirtIO over PCI. Disabling also disables Storage</div>
+                </div>
+                <label class="toggle-switch">
+                    <input type="checkbox" id="enablePCI" ${props.enablePCI ? 'checked' : ''}>
+                    <span class="toggle-slider"></span>
+                </label>
+            </div>
+
+            <div class="toggle-field toggle-child toggle-grandchild" id="field-storage">
+                <div class="toggle-info">
+                    <div class="toggle-label">Storage Support</div>
+                    <div class="toggle-hint">AHCI/SATA and NVMe block devices. Disabling also disables FAT</div>
+                </div>
+                <label class="toggle-switch">
+                    <input type="checkbox" id="enableStorage" ${props.enableStorage ? 'checked' : ''}>
+                    <span class="toggle-slider"></span>
+                </label>
+            </div>
+
+            <div class="toggle-field toggle-child toggle-grandchild" id="field-fat">
+                <div class="toggle-info">
+                    <div class="toggle-label">FAT Filesystem</div>
+                    <div class="toggle-hint">FAT filesystem support, mounted on a storage block device</div>
+                </div>
+                <label class="toggle-switch">
+                    <input type="checkbox" id="enableFat" ${props.enableFat ? 'checked' : ''}>
+                    <span class="toggle-slider"></span>
+                </label>
+            </div>
+
+            <div class="toggle-field" id="field-graphics">
                 <div class="toggle-info">
                     <div class="toggle-label">Graphic Support</div>
                     <div class="toggle-hint">Enable graphics display</div>
                 </div>
                 <label class="toggle-switch">
                     <input type="checkbox" id="enableGraphics" ${props.enableGraphics ? 'checked' : ''}>
+                    <span class="toggle-slider"></span>
+                </label>
+            </div>
+
+            <div class="toggle-field" id="field-uart">
+                <div class="toggle-info">
+                    <div class="toggle-label">UART / Serial</div>
+                    <div class="toggle-hint">Serial port output. Disabling it silences the serial console the debugger and test runner read</div>
+                </div>
+                <label class="toggle-switch">
+                    <input type="checkbox" id="enableUART" ${props.enableUART ? 'checked' : ''}>
                     <span class="toggle-slider"></span>
                 </label>
             </div>
@@ -588,15 +632,15 @@ function getPropertiesWebviewContent(props: ProjectProperties, csprojPath: strin
                     <option value="none" ${props.qemu.networkCard === 'none' ? 'selected' : ''}>None (no network card)</option>
                     ${props.targetArch === 'x64' ? `
                         <option value="e1000e" ${props.qemu.networkCard === 'e1000e' ? 'selected' : ''}>Intel E1000E (PCIe)</option>
+                        <option value="virtio-net-pci" ${props.qemu.networkCard === 'virtio-net-pci' ? 'selected' : ''}>VirtIO (virtio-net-pci)</option>
                         <option value="e1000" disabled>Intel E1000 — no driver</option>
                         <option value="rtl8139" disabled>Realtek RTL8139 — no driver</option>
-                        <option value="virtio-net-pci" disabled>VirtIO (virtio-net-pci) — no driver</option>
                     ` : `
                         <option value="virtio-net-device" ${props.qemu.networkCard === 'virtio-net-device' ? 'selected' : ''}>VirtIO (virtio-net-device)</option>
                         <option value="e1000e" disabled>Intel E1000E — x64 only</option>
                     `}
                 </select>
-                <div class="field-hint">The network adapter the kernel sees. Pick &quot;None&quot; for no networking; cards without a kernel driver are grayed out. Supported: ${props.targetArch === 'x64' ? 'Intel E1000E' : 'VirtIO (virtio-net-device)'}.</div>
+                <div class="field-hint">The network adapter the kernel sees. Pick &quot;None&quot; for no networking; cards without a kernel driver are grayed out. Supported: ${props.targetArch === 'x64' ? 'Intel E1000E and VirtIO over PCI — VirtIO needs PCI enabled' : 'VirtIO over MMIO (virtio-net-device)'}.</div>
             </div>
 
             <div class="field">
@@ -605,13 +649,14 @@ function getPropertiesWebviewContent(props: ProjectProperties, csprojPath: strin
                     <option value="none" ${props.qemu.keyboard === 'none' ? 'selected' : ''}>None (no keyboard)</option>
                     ${props.targetArch === 'x64' ? `
                         <option value="ps2" ${props.qemu.keyboard === 'ps2' ? 'selected' : ''}>PS/2 (i8042)</option>
-                        <option value="virtio-keyboard-device" disabled>VirtIO Keyboard — x64 has no driver</option>
+                        <option value="virtio-keyboard-pci" ${props.qemu.keyboard === 'virtio-keyboard-pci' ? 'selected' : ''}>VirtIO Keyboard (PCI)</option>
+                        <option value="virtio-keyboard-device" disabled>VirtIO Keyboard (MMIO) — arm64 only</option>
                     ` : `
-                        <option value="virtio-keyboard-device" ${props.qemu.keyboard === 'virtio-keyboard-device' ? 'selected' : ''}>VirtIO Keyboard</option>
+                        <option value="virtio-keyboard-device" ${props.qemu.keyboard === 'virtio-keyboard-device' ? 'selected' : ''}>VirtIO Keyboard (MMIO)</option>
                         <option value="ps2" disabled>PS/2 — virt has no i8042</option>
                     `}
                 </select>
-                <div class="field-hint">The keyboard device the kernel reads input from. Devices without a kernel driver are grayed out. Supported: ${props.targetArch === 'x64' ? 'PS/2 (built into the q35 chipset)' : 'VirtIO (the arm64 virt machine has no PS/2)'}.</div>
+                <div class="field-hint">The keyboard device the kernel reads input from. Devices without a kernel driver are grayed out. Supported: ${props.targetArch === 'x64' ? 'PS/2 (built into the q35 chipset) and VirtIO over PCI — VirtIO needs PCI enabled' : 'VirtIO over MMIO (the arm64 virt machine has no PS/2)'}.</div>
             </div>
 
             <div class="field">
@@ -620,13 +665,14 @@ function getPropertiesWebviewContent(props: ProjectProperties, csprojPath: strin
                     <option value="none" ${props.qemu.mouse === 'none' ? 'selected' : ''}>None (no mouse)</option>
                     ${props.targetArch === 'x64' ? `
                         <option value="ps2" ${props.qemu.mouse === 'ps2' ? 'selected' : ''}>PS/2 (i8042)</option>
-                        <option value="virtio-mouse-device" disabled>VirtIO Mouse — x64 has no driver</option>
+                        <option value="virtio-mouse-pci" ${props.qemu.mouse === 'virtio-mouse-pci' ? 'selected' : ''}>VirtIO Mouse (PCI)</option>
+                        <option value="virtio-mouse-device" disabled>VirtIO Mouse (MMIO) — arm64 only</option>
                     ` : `
-                        <option value="virtio-mouse-device" ${props.qemu.mouse === 'virtio-mouse-device' ? 'selected' : ''}>VirtIO Mouse</option>
+                        <option value="virtio-mouse-device" ${props.qemu.mouse === 'virtio-mouse-device' ? 'selected' : ''}>VirtIO Mouse (MMIO)</option>
                         <option value="ps2" disabled>PS/2 — virt has no i8042</option>
                     `}
                 </select>
-                <div class="field-hint">The pointing device the kernel reads. Devices without a kernel driver are grayed out. Supported: ${props.targetArch === 'x64' ? 'PS/2 (built into the q35 chipset)' : 'VirtIO (the arm64 virt machine has no PS/2)'}.</div>
+                <div class="field-hint">The pointing device the kernel reads. Devices without a kernel driver are grayed out. Supported: ${props.targetArch === 'x64' ? 'PS/2 (built into the q35 chipset) and VirtIO over PCI — VirtIO needs PCI enabled' : 'VirtIO over MMIO (the arm64 virt machine has no PS/2)'}.</div>
             </div>
             </div>
             </div>
@@ -690,6 +736,10 @@ function getPropertiesWebviewContent(props: ProjectProperties, csprojPath: strin
                 enableMouse: document.getElementById('enableMouse').checked,
                 enableNetwork: document.getElementById('enableNetwork').checked,
                 enableScheduler: document.getElementById('enableScheduler').checked,
+                enableUART: document.getElementById('enableUART').checked,
+                enablePCI: document.getElementById('enablePCI').checked,
+                enableStorage: document.getElementById('enableStorage').checked,
+                enableFat: document.getElementById('enableFat').checked,
                 gccFlags: document.getElementById('gccFlags').value
             };
             vscode.postMessage({ command: 'save', properties });
@@ -798,15 +848,23 @@ function getPropertiesWebviewContent(props: ProjectProperties, csprojPath: strin
             qemuSaveTimeout = setTimeout(saveQemu, 300);
         }
 
+        // Mirrors the cascade in Sdk.targets, which is what the build actually
+        // applies. Graphics and UART are deliberately absent: the SDK never
+        // cascades them, so hiding them here would tell the user a feature was
+        // turned off while the build kept it on.
         function updateFeatureVisibility() {
             const interruptsOn = document.getElementById('enableInterrupts').checked;
             const timerOn = interruptsOn && document.getElementById('enableTimer').checked;
+            const pciOn = interruptsOn && document.getElementById('enablePCI').checked;
+            const storageOn = pciOn && document.getElementById('enableStorage').checked;
 
-            const interruptChildren = ['field-timer', 'field-keyboard', 'field-mouse', 'field-network', 'field-graphics'];
+            const interruptChildren = ['field-timer', 'field-keyboard', 'field-mouse', 'field-network', 'field-pci'];
             for (const id of interruptChildren) {
                 document.getElementById(id).classList.toggle('hidden', !interruptsOn);
             }
             document.getElementById('field-scheduler').classList.toggle('hidden', !timerOn);
+            document.getElementById('field-storage').classList.toggle('hidden', !pciOn);
+            document.getElementById('field-fat').classList.toggle('hidden', !storageOn);
         }
 
         // Auto-save on any input change
@@ -820,6 +878,10 @@ function getPropertiesWebviewContent(props: ProjectProperties, csprojPath: strin
         document.getElementById('enableGraphics').addEventListener('change', save);
         document.getElementById('enableNetwork').addEventListener('change', save);
         document.getElementById('enableScheduler').addEventListener('change', save);
+        document.getElementById('enablePCI').addEventListener('change', function() { updateFeatureVisibility(); save(); });
+        document.getElementById('enableStorage').addEventListener('change', function() { updateFeatureVisibility(); save(); });
+        document.getElementById('enableFat').addEventListener('change', save);
+        document.getElementById('enableUART').addEventListener('change', save);
         document.getElementById('gccFlags').addEventListener('input', onInputChange);
 
         // Set initial visibility based on current csproj state

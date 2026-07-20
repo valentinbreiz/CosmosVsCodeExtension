@@ -121,6 +121,10 @@ export interface ProjectProperties {
     enableMouse: boolean;
     enableNetwork: boolean;
     enableScheduler: boolean;
+    enableUART: boolean;
+    enablePCI: boolean;
+    enableStorage: boolean;
+    enableFat: boolean;
     gccFlags: string;
     packages: { name: string; version: string }[];
     qemu: QemuConfig;
@@ -156,16 +160,22 @@ export function loadQemuConfig(projectDir: string, arch: string): QemuConfig {
     const arm64CpuModels = ['cortex-a72', 'cortex-a53', 'max'];
 
     // NIC models with a kernel driver, per architecture ('none' = no card).
-    // The kernel only ships E1000E (x64) and VirtioNet (arm64), so anything
-    // else is rejected back to 'none' rather than persisted.
-    const x64NetworkCards = ['none', 'e1000e'];
+    // Anything else is reset to the default rather than persisted.
+    //
+    // The virtio drivers are transport-agnostic: one VirtioNet binds over
+    // virtio-mmio on the arm64 virt machine and over virtio-pci on q35, which
+    // has no virtio-mmio window. The model is *-pci on x64 and *-device on
+    // arm64 because those are genuinely different QEMU devices, not two
+    // spellings of the same one.
+    const x64NetworkCards = ['none', 'e1000e', 'virtio-net-pci'];
     const arm64NetworkCards = ['none', 'virtio-net-device'];
 
     // Input devices with a kernel driver, per architecture. x64 has PS/2
-    // (i8042) drivers; arm64 virt has no PS/2 controller and uses virtio-input.
-    const x64Keyboards = ['ps2', 'none'];
+    // (i8042) built into q35, plus virtio-input over PCI; the arm64 virt
+    // machine has no PS/2 controller at all and uses virtio-input over MMIO.
+    const x64Keyboards = ['ps2', 'none', 'virtio-keyboard-pci'];
     const arm64Keyboards = ['virtio-keyboard-device', 'none'];
-    const x64Mice = ['ps2', 'none'];
+    const x64Mice = ['ps2', 'none', 'virtio-mouse-pci'];
     const arm64Mice = ['virtio-mouse-device', 'none'];
 
     try {
@@ -298,6 +308,10 @@ export function parseProjectProperties(csprojPath: string): ProjectProperties {
         enableMouse: getProperty('CosmosEnableMouse') !== 'false',
         enableNetwork: getProperty('CosmosEnableNetwork') !== 'false',
         enableScheduler: getProperty('CosmosEnableScheduler') !== 'false',
+        enableUART: getProperty('CosmosEnableUART') !== 'false',
+        enablePCI: getProperty('CosmosEnablePCI') !== 'false',
+        enableStorage: getProperty('CosmosEnableStorage') !== 'false',
+        enableFat: getProperty('CosmosEnableFat') !== 'false',
         gccFlags: getProperty('GCCCompilerFlags') || '',
         packages,
         qemu: loadQemuConfig(projectDir, targetArch)
@@ -398,6 +412,30 @@ export function saveProjectProperties(csprojPath: string, props: ProjectProperti
         removeProperty('CosmosEnableScheduler');
     } else {
         setProperty('CosmosEnableScheduler', 'false');
+    }
+
+    if (props.enableUART) {
+        removeProperty('CosmosEnableUART');
+    } else {
+        setProperty('CosmosEnableUART', 'false');
+    }
+
+    if (props.enablePCI) {
+        removeProperty('CosmosEnablePCI');
+    } else {
+        setProperty('CosmosEnablePCI', 'false');
+    }
+
+    if (props.enableStorage) {
+        removeProperty('CosmosEnableStorage');
+    } else {
+        setProperty('CosmosEnableStorage', 'false');
+    }
+
+    if (props.enableFat) {
+        removeProperty('CosmosEnableFat');
+    } else {
+        setProperty('CosmosEnableFat', 'false');
     }
 
     fs.writeFileSync(csprojPath, content);
