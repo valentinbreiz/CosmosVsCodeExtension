@@ -59,6 +59,28 @@ export function buildNicArgs(networkCard: string | undefined): string[] {
     return ['--nic', networkCard.trim()];
 }
 
+// Build `cosmos run --hostfwd <rule>` args, one per configured port forward
+// (e.g. tcp::2323-:23). The launcher validates each rule and puts it on the
+// network card's user-mode backend; with no card it refuses them.
+export function buildHostForwardArgs(portForwards: string[] | undefined): string[] {
+    const args: string[] = [];
+    for (const rule of portForwards ?? []) {
+        if (rule.trim()) {
+            args.push('--hostfwd', rule.trim());
+        }
+    }
+    return args;
+}
+
+// Split the free-form Extra Arguments field into the argv entries that follow
+// `cosmos run --`: whitespace separates arguments, except inside double
+// quotes. The quotes stay in the entry, since cosmos run joins the entries
+// back into QEMU's command line, where they still group the quoted text into
+// one argument (e.g. -name "my vm" or file="a b.img").
+export function splitExtraArgs(extraArgs: string | undefined): string[] {
+    return (extraArgs ?? '').match(/(?:[^\s"]+|"[^"]*")+/g) ?? [];
+}
+
 // Build `cosmos run --keyboard/--mouse <model>` args from the configured input
 // devices. Values are passed through as-is; the launcher treats 'ps2'/'none' as
 // "add nothing" (x64 PS/2 is built into the chipset) and attaches only real

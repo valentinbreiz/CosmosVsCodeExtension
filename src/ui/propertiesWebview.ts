@@ -644,6 +644,12 @@ function getPropertiesWebviewContent(props: ProjectProperties, csprojPath: strin
             </div>
 
             <div class="field">
+                <label class="field-label">Port Forwards</label>
+                <input type="text" id="qemuPortForwards" class="field-input" value="${props.qemu.portForwards.join(' ')}" placeholder="tcp::2323-:23">
+                <div class="field-hint">Host ports forwarded to the guest, separated by spaces, each as <code>[tcp|udp]:[hostaddr]:hostport-[guestaddr]:guestport</code>: <code>tcp::2323-:23</code> reaches the guest's port 23 (Telnet) at <code>localhost:2323</code>. Needs a network card.</div>
+            </div>
+
+            <div class="field">
                 <label class="field-label">Keyboard</label>
                 <select id="qemuKeyboard" class="field-input">
                     <option value="none" ${props.qemu.keyboard === 'none' ? 'selected' : ''}>None (no keyboard)</option>
@@ -753,6 +759,9 @@ function getPropertiesWebviewContent(props: ProjectProperties, csprojPath: strin
                 cpuModel: document.getElementById('qemuCpuModel').value,
                 serialMode: document.getElementById('qemuSerialMode').value,
                 networkCard: document.getElementById('qemuNetworkCard').value,
+                // Rules hold no spaces or commas, so either separates them.
+                portForwards: document.getElementById('qemuPortForwards').value
+                    .split(',').join(' ').split(' ').filter(r => r),
                 keyboard: document.getElementById('qemuKeyboard').value,
                 mouse: document.getElementById('qemuMouse').value,
                 // Legacy network toggle/ports are no longer editable in this panel;
@@ -893,6 +902,7 @@ function getPropertiesWebviewContent(props: ProjectProperties, csprojPath: strin
         document.getElementById('qemuCpuModel').addEventListener('change', saveQemu);
         document.getElementById('qemuSerialMode').addEventListener('change', saveQemu);
         document.getElementById('qemuNetworkCard').addEventListener('change', saveQemu);
+        document.getElementById('qemuPortForwards').addEventListener('input', onQemuInputChange);
         document.getElementById('qemuKeyboard').addEventListener('change', saveQemu);
         document.getElementById('qemuMouse').addEventListener('change', saveQemu);
         document.getElementById('qemuExtraArgs').addEventListener('input', onQemuInputChange);

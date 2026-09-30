@@ -100,6 +100,10 @@ export interface QemuConfig {
     serialMode: string;
     // QEMU NIC model exposed to the guest, or 'none' for no network card.
     networkCard: string;
+    // Host ports forwarded to the guest, each a QEMU hostfwd rule such as
+    // 'tcp::2323-:23' (the guest's port 23 at localhost:2323). They ride on
+    // the network card's user-mode backend, so they need a card.
+    portForwards: string[];
     // Keyboard device: 'ps2' (x64 chipset), 'virtio-keyboard-device' (arm64), or 'none'.
     keyboard: string;
     // Mouse device: 'ps2' (x64 chipset), 'virtio-mouse-device' (arm64), or 'none'.
@@ -139,6 +143,7 @@ export function getDefaultQemuConfig(arch: string): QemuConfig {
         networkPorts: '5555',
         serialMode: 'stdio',
         networkCard: 'none',
+        portForwards: [],
         // x64 gets PS/2 from the chipset; arm64 virt needs virtio-input devices.
         keyboard: arch === 'arm64' ? 'virtio-keyboard-device' : 'ps2',
         mouse: arch === 'arm64' ? 'virtio-mouse-device' : 'ps2',
@@ -198,6 +203,8 @@ export function loadQemuConfig(projectDir: string, arch: string): QemuConfig {
                     }));
             }
 
+            merged.portForwards = normalizePortForwards(merged.portForwards);
+
             // Validate machine type matches architecture
             if (arch === 'arm64') {
                 if (!arm64MachineTypes.includes(merged.machineType)) {
@@ -238,6 +245,18 @@ export function loadQemuConfig(projectDir: string, arch: string): QemuConfig {
     } catch { } // Ignore errors parsing config file
 
     return defaults;
+}
+
+// Port forwards may be absent in older configs, or hand-written as one
+// string; normalize to a clean array of rules. A string is split on spaces
+// and commas, which no hostfwd rule contains.
+export function normalizePortForwards(value: unknown): string[] {
+    const items: unknown[] = typeof value === 'string'
+        ? value.split(/[\s,]+/)
+        : Array.isArray(value) ? value : [];
+    return items
+        .filter((r): r is string => typeof r === 'string' && r.trim() !== '')
+        .map(r => r.trim());
 }
 
 export function saveQemuConfig(projectDir: string, qemu: QemuConfig): void {
