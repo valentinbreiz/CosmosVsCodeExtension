@@ -96,6 +96,18 @@ export function buildInputArgs(keyboard: string | undefined, mouse: string | und
     return args;
 }
 
+// Build the `cosmos run --audio <model>` argument from the configured sound
+// card. 'none' is the default and yields no args, so a project without audio
+// launches exactly the command it did before the selector existed; any other
+// value names a QEMU HD Audio controller for the launcher to attach, codec
+// included.
+export function buildAudioArgs(audio: string | undefined): string[] {
+    if (!audio || !audio.trim() || audio.trim() === 'none') {
+        return [];
+    }
+    return ['--audio', audio.trim()];
+}
+
 // Turn the project's configured disks into `cosmos run --disk <path>,<kind>`
 // arguments, creating any image that doesn't exist yet as a sparse file of the
 // requested size. Paths are resolved against the project directory; existing

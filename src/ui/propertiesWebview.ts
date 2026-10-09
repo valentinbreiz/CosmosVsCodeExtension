@@ -530,6 +530,17 @@ function getPropertiesWebviewContent(props: ProjectProperties, csprojPath: strin
                 </label>
             </div>
 
+            <div class="toggle-field toggle-child toggle-grandchild" id="field-audio">
+                <div class="toggle-info">
+                    <div class="toggle-label">Audio Support</div>
+                    <div class="toggle-hint">HD Audio playback over PCI</div>
+                </div>
+                <label class="toggle-switch">
+                    <input type="checkbox" id="enableAudio" ${props.enableAudio ? 'checked' : ''}>
+                    <span class="toggle-slider"></span>
+                </label>
+            </div>
+
             <div class="toggle-field" id="field-graphics">
                 <div class="toggle-info">
                     <div class="toggle-label">Graphic Support</div>
@@ -680,6 +691,22 @@ function getPropertiesWebviewContent(props: ProjectProperties, csprojPath: strin
                 </select>
                 <div class="field-hint">The pointing device the kernel reads. Devices without a kernel driver are grayed out. Supported: ${props.targetArch === 'x64' ? 'PS/2 (built into the q35 chipset) and VirtIO over PCI — VirtIO needs PCI enabled' : 'VirtIO over MMIO (the arm64 virt machine has no PS/2)'}.</div>
             </div>
+
+            <div class="field">
+                <label class="field-label">Audio</label>
+                <select id="qemuAudio" class="field-input">
+                    <option value="none" ${props.qemu.audio === 'none' ? 'selected' : ''}>None (no audio)</option>
+                    ${props.targetArch === 'x64' ? `
+                        <option value="intel-hda" ${props.qemu.audio === 'intel-hda' ? 'selected' : ''}>Intel HD Audio (ICH6)</option>
+                        <option value="ich9-intel-hda" ${props.qemu.audio === 'ich9-intel-hda' ? 'selected' : ''}>Intel HD Audio (ICH9)</option>
+                        <option value="ac97" disabled>Intel AC97 — no driver</option>
+                        <option value="es1370" disabled>ENSONIQ ES1370 — no driver</option>
+                    ` : `
+                        <option value="intel-hda" disabled>Intel HD Audio — x64 only</option>
+                    `}
+                </select>
+                <div class="field-hint">The sound card the kernel plays through. Controllers without a kernel driver are grayed out. ${props.targetArch === 'x64' ? 'A codec is attached alongside the controller, and the host backend is QEMU\'s default — audio needs PCI enabled.' : 'The HD Audio driver has only been run on x64.'}</div>
+            </div>
             </div>
             </div>
 
@@ -746,6 +773,7 @@ function getPropertiesWebviewContent(props: ProjectProperties, csprojPath: strin
                 enablePCI: document.getElementById('enablePCI').checked,
                 enableStorage: document.getElementById('enableStorage').checked,
                 enableFat: document.getElementById('enableFat').checked,
+                enableAudio: document.getElementById('enableAudio').checked,
                 gccFlags: document.getElementById('gccFlags').value
             };
             vscode.postMessage({ command: 'save', properties });
@@ -764,6 +792,7 @@ function getPropertiesWebviewContent(props: ProjectProperties, csprojPath: strin
                     .split(',').join(' ').split(' ').filter(r => r),
                 keyboard: document.getElementById('qemuKeyboard').value,
                 mouse: document.getElementById('qemuMouse').value,
+                audio: document.getElementById('qemuAudio').value,
                 // Legacy network toggle/ports are no longer editable in this panel;
                 // preserve whatever the project already had so saving doesn't wipe it.
                 enableNetwork: ${props.qemu.enableNetwork},
@@ -874,6 +903,7 @@ function getPropertiesWebviewContent(props: ProjectProperties, csprojPath: strin
             document.getElementById('field-scheduler').classList.toggle('hidden', !timerOn);
             document.getElementById('field-storage').classList.toggle('hidden', !pciOn);
             document.getElementById('field-fat').classList.toggle('hidden', !storageOn);
+            document.getElementById('field-audio').classList.toggle('hidden', !pciOn);
         }
 
         // Auto-save on any input change
@@ -890,6 +920,7 @@ function getPropertiesWebviewContent(props: ProjectProperties, csprojPath: strin
         document.getElementById('enablePCI').addEventListener('change', function() { updateFeatureVisibility(); save(); });
         document.getElementById('enableStorage').addEventListener('change', function() { updateFeatureVisibility(); save(); });
         document.getElementById('enableFat').addEventListener('change', save);
+        document.getElementById('enableAudio').addEventListener('change', save);
         document.getElementById('enableUART').addEventListener('change', save);
         document.getElementById('gccFlags').addEventListener('input', onInputChange);
 
@@ -905,6 +936,7 @@ function getPropertiesWebviewContent(props: ProjectProperties, csprojPath: strin
         document.getElementById('qemuPortForwards').addEventListener('input', onQemuInputChange);
         document.getElementById('qemuKeyboard').addEventListener('change', saveQemu);
         document.getElementById('qemuMouse').addEventListener('change', saveQemu);
+        document.getElementById('qemuAudio').addEventListener('change', saveQemu);
         document.getElementById('qemuExtraArgs').addEventListener('input', onQemuInputChange);
 
         // Render the disk list from the loaded config.
