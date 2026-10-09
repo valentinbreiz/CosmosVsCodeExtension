@@ -32,7 +32,7 @@ export async function buildCommand(arch?: string) {
 
     if (!config) return;
 
-    const projectDir = path.dirname(projectInfo.csproj);
+    const projectDir = path.dirname(projectInfo.projectFile);
 
     // Show output in the build channel
     buildChannel.show(true);

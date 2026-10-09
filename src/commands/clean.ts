@@ -17,7 +17,7 @@ export async function cleanCommand() {
 
     if (confirm !== 'Yes') return;
 
-    const projectDir = path.dirname(projectInfo.csproj);
+    const projectDir = path.dirname(projectInfo.projectFile);
     const dirsToClean = ['output-x64', 'output-arm64', 'bin', 'obj'];
     let cleaned = 0;
 
