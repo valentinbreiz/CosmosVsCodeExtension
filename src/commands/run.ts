@@ -25,7 +25,7 @@ export async function runCommand(arch?: string) {
         arch = projectInfo.arch;
     }
 
-    const projectDir = path.dirname(projectInfo.csproj);
+    const projectDir = path.dirname(projectInfo.projectFile);
     const outputDir = path.join(projectDir, `output-${arch}`);
 
     if (!fs.existsSync(outputDir)) {
@@ -46,7 +46,7 @@ export async function runCommand(arch?: string) {
     }
 
     const isoPath = path.join(outputDir, isoFiles[0]);
-    const props = parseProjectProperties(projectInfo.csproj);
+    const props = parseProjectProperties(projectInfo.projectFile);
 
     const cosmosCmd = getCosmosToolsPath();
     if (!cosmosCmd) {

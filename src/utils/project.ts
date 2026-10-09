@@ -2,7 +2,10 @@ import * as vscode from 'vscode';
 import * as path from 'path';
 import * as fs from 'fs';
 
-export function findCsprojFiles(dir: string, depth: number = 0): string[] {
+// A kernel is a C# or a Visual Basic project.
+const projectExtensions = ['.csproj', '.vbproj'];
+
+export function findProjectFiles(dir: string, depth: number = 0): string[] {
     if (depth > 3) return []; // Limit search depth
     const results: string[] = [];
 
@@ -10,10 +13,10 @@ export function findCsprojFiles(dir: string, depth: number = 0): string[] {
         const entries = fs.readdirSync(dir, { withFileTypes: true });
         for (const entry of entries) {
             const fullPath = path.join(dir, entry.name);
-            if (entry.isFile() && entry.name.endsWith('.csproj')) {
+            if (entry.isFile() && projectExtensions.includes(path.extname(entry.name))) {
                 results.push(fullPath);
             } else if (entry.isDirectory() && !entry.name.startsWith('.') && entry.name !== 'node_modules' && entry.name !== 'bin' && entry.name !== 'obj') {
-                results.push(...findCsprojFiles(fullPath, depth + 1));
+                results.push(...findProjectFiles(fullPath, depth + 1));
             }
         }
     } catch { } // Ignore errors like permission denied
@@ -26,11 +29,11 @@ export function isCosmosProject(): boolean {
     if (!workspaceFolders) return false;
 
     for (const folder of workspaceFolders) {
-        const csprojFiles = findCsprojFiles(folder.uri.fsPath);
+        const projectFiles = findProjectFiles(folder.uri.fsPath);
 
-        for (const csproj of csprojFiles) {
+        for (const projectFile of projectFiles) {
             try {
-                const content = fs.readFileSync(csproj, 'utf8');
+                const content = fs.readFileSync(projectFile, 'utf8');
                 if (content.includes('Cosmos.Sdk') || content.includes('Cosmos.Kernel')) {
                     return true;
                 }
@@ -45,18 +48,18 @@ export function updateCosmosProjectContext() {
     vscode.commands.executeCommand('setContext', 'cosmos:isCosmosProject', isCosmos);
 }
 
-export function getProjectInfo(): { name: string; arch: string; csproj: string } | null {
+export function getProjectInfo(): { name: string; arch: string; projectFile: string } | null {
     const workspaceFolders = vscode.workspace.workspaceFolders;
     if (!workspaceFolders) return null;
 
     for (const folder of workspaceFolders) {
-        const csprojFiles = findCsprojFiles(folder.uri.fsPath);
+        const projectFiles = findProjectFiles(folder.uri.fsPath);
 
-        for (const csproj of csprojFiles) {
+        for (const projectFile of projectFiles) {
             try {
-                const content = fs.readFileSync(csproj, 'utf8');
+                const content = fs.readFileSync(projectFile, 'utf8');
                 if (content.includes('Cosmos.Sdk') || content.includes('Cosmos.Kernel')) {
-                    const projectDir = path.dirname(csproj);
+                    const projectDir = path.dirname(projectFile);
 
                     // Read architecture from .cosmos/config.json
                     let arch = 'x64';
@@ -71,12 +74,12 @@ export function getProjectInfo(): { name: string; arch: string; csproj: string }
                     }
 
                     return {
-                        name: path.basename(csproj, '.csproj'),
+                        name: path.basename(projectFile, path.extname(projectFile)),
                         arch: arch,
-                        csproj: csproj
+                        projectFile: projectFile
                     };
                 }
-            } catch { } // Ignore errors reading csproj file
+            } catch { } // Ignore errors reading the project file
         }
     }
     return null;
@@ -298,10 +301,10 @@ export function saveQemuConfig(projectDir: string, qemu: QemuConfig): void {
     fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
 }
 
-export function parseProjectProperties(csprojPath: string): ProjectProperties {
-    const content = fs.readFileSync(csprojPath, 'utf8');
-    const name = path.basename(csprojPath, '.csproj');
-    const projectDir = path.dirname(csprojPath);
+export function parseProjectProperties(projectFile: string): ProjectProperties {
+    const content = fs.readFileSync(projectFile, 'utf8');
+    const name = path.basename(projectFile, path.extname(projectFile));
+    const projectDir = path.dirname(projectFile);
 
     // Parse properties using regex
     const getProperty = (prop: string): string => {
@@ -358,8 +361,8 @@ export function parseProjectProperties(csprojPath: string): ProjectProperties {
     };
 }
 
-export function saveProjectProperties(csprojPath: string, props: ProjectProperties): void {
-    let content = fs.readFileSync(csprojPath, 'utf8');
+export function saveProjectProperties(projectFile: string, props: ProjectProperties): void {
+    let content = fs.readFileSync(projectFile, 'utf8');
 
     // Helper to set or add property
     const setProperty = (prop: string, value: string) => {
@@ -387,7 +390,7 @@ export function saveProjectProperties(csprojPath: string, props: ProjectProperti
     setProperty('TargetFramework', props.targetFramework || 'net10.0');
 
     // Save targetArch to .cosmos/config.json
-    const projectDir = path.dirname(csprojPath);
+    const projectDir = path.dirname(projectFile);
     const cosmosDir = path.join(projectDir, '.cosmos');
     if (!fs.existsSync(cosmosDir)) {
         fs.mkdirSync(cosmosDir, { recursive: true });
@@ -484,5 +487,5 @@ export function saveProjectProperties(csprojPath: string, props: ProjectProperti
         setProperty('CosmosEnableAudio', 'false');
     }
 
-    fs.writeFileSync(csprojPath, content);
+    fs.writeFileSync(projectFile, content);
 }

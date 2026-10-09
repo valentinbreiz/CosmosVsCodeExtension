@@ -1,10 +1,10 @@
 # Cosmos OS for VS Code
 
-VS Code extension for [Cosmos gen3](https://github.com/valentinbreiz/nativeaot-patcher), the NativeAOT-based C# kernel framework. Create, build, run and debug a kernel without leaving the editor.
+VS Code extension for [Cosmos gen3](https://github.com/valentinbreiz/nativeaot-patcher), the NativeAOT-based kernel framework. Create, build, run and debug a C# or Visual Basic kernel without leaving the editor.
 
 ## Features
 
-- New kernel project from the `cosmos new` template
+- New kernel project in C# or Visual Basic, from the `cosmos-kernel-csharp` and `cosmos-kernel-vb` templates
 - Build the kernel and run it in QEMU
 - Debug with GDB (needs the C/C++ extension, `ms-vscode.cpptools`)
 - Check and install the toolchain (.NET 10 SDK, Cosmos CLI, QEMU, GDB)

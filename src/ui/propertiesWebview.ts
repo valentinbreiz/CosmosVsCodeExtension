@@ -10,7 +10,7 @@ export function showProjectProperties(context: vscode.ExtensionContext, projectT
         return;
     }
 
-    const props = parseProjectProperties(projectInfo.csproj);
+    const props = parseProjectProperties(projectInfo.projectFile);
 
     const panel = vscode.window.createWebviewPanel(
         'cosmosProperties',
@@ -22,7 +22,7 @@ export function showProjectProperties(context: vscode.ExtensionContext, projectT
         }
     );
 
-    panel.webview.html = getPropertiesWebviewContent(props, projectInfo.csproj);
+    panel.webview.html = getPropertiesWebviewContent(props, projectInfo.projectFile);
 
     // The arch drives which Machine Type / CPU Model / Network Card options the
     // page renders. Those are baked into the HTML at generation time, so a switch
@@ -34,15 +34,15 @@ export function showProjectProperties(context: vscode.ExtensionContext, projectT
             switch (message.command) {
                 case 'save':
                     try {
-                        saveProjectProperties(projectInfo.csproj, message.properties);
+                        saveProjectProperties(projectInfo.projectFile, message.properties);
                         vscode.window.showInformationMessage('Project properties saved successfully');
                         projectTreeProvider.refresh();
                         if (message.properties?.targetArch && message.properties.targetArch !== currentArch) {
                             currentArch = message.properties.targetArch;
                             // Re-parse so the arch-dependent dropdowns (and any
                             // values validated against the new arch) refresh.
-                            const refreshed = parseProjectProperties(projectInfo.csproj);
-                            panel.webview.html = getPropertiesWebviewContent(refreshed, projectInfo.csproj);
+                            const refreshed = parseProjectProperties(projectInfo.projectFile);
+                            panel.webview.html = getPropertiesWebviewContent(refreshed, projectInfo.projectFile);
                         }
                     } catch (error: any) {
                         vscode.window.showErrorMessage(`Failed to save: ${error.message}`);
@@ -50,14 +50,14 @@ export function showProjectProperties(context: vscode.ExtensionContext, projectT
                     break;
                 case 'saveQemu':
                     try {
-                        const projectDir = path.dirname(projectInfo.csproj);
+                        const projectDir = path.dirname(projectInfo.projectFile);
                         saveQemuConfig(projectDir, message.qemu);
                     } catch (error: any) {
                         vscode.window.showErrorMessage(`Failed to save QEMU config: ${error.message}`);
                     }
                     break;
-                case 'openCsproj':
-                    vscode.workspace.openTextDocument(projectInfo.csproj).then(doc => {
+                case 'openProjectFile':
+                    vscode.workspace.openTextDocument(projectInfo.projectFile).then(doc => {
                         vscode.window.showTextDocument(doc);
                     });
                     break;
@@ -68,7 +68,7 @@ export function showProjectProperties(context: vscode.ExtensionContext, projectT
     );
 }
 
-function getPropertiesWebviewContent(props: ProjectProperties, csprojPath: string): string {
+function getPropertiesWebviewContent(props: ProjectProperties, projectFile: string): string {
     return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -397,7 +397,7 @@ function getPropertiesWebviewContent(props: ProjectProperties, csprojPath: strin
                 </div>
                 <div class="header-actions">
                     <span id="saveStatus" class="save-status">Saved</span>
-                    <button class="btn btn-secondary" onclick="openCsproj()">Edit .csproj</button>
+                    <button class="btn btn-secondary" onclick="openProjectFile()">Edit ${path.basename(projectFile)}</button>
                 </div>
             </div>
         </div>
@@ -924,7 +924,7 @@ function getPropertiesWebviewContent(props: ProjectProperties, csprojPath: strin
         document.getElementById('enableUART').addEventListener('change', save);
         document.getElementById('gccFlags').addEventListener('input', onInputChange);
 
-        // Set initial visibility based on current csproj state
+        // Set initial visibility based on current project file state
         updateFeatureVisibility();
 
         // QEMU config auto-save
@@ -942,8 +942,8 @@ function getPropertiesWebviewContent(props: ProjectProperties, csprojPath: strin
         // Render the disk list from the loaded config.
         renderDisks();
 
-        function openCsproj() {
-            vscode.postMessage({ command: 'openCsproj' });
+        function openProjectFile() {
+            vscode.postMessage({ command: 'openProjectFile' });
         }
     </script>
 </body>

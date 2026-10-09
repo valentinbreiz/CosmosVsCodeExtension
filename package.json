@@ -26,13 +26,17 @@
   ],
   "activationEvents": [
     "onStartupFinished",
-    "workspaceContains:**/*.csproj"
+    "workspaceContains:**/*.csproj",
+    "workspaceContains:**/*.vbproj"
   ],
   "main": "./out/extension.js",
   "contributes": {
     "breakpoints": [
       {
         "language": "csharp"
+      },
+      {
+        "language": "vb"
       }
     ],
     "debuggers": [
@@ -40,14 +44,16 @@
         "type": "cosmos-run",
         "label": "Cosmos Run",
         "languages": [
-          "csharp"
+          "csharp",
+          "vb"
         ]
       },
       {
         "type": "cosmos-debug",
         "label": "Cosmos: Debug Kernel",
         "languages": [
-          "csharp"
+          "csharp",
+          "vb"
         ],
         "configurationAttributes": {
           "launch": {
