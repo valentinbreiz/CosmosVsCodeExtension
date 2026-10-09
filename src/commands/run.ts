@@ -9,7 +9,7 @@ import { getOutputChannel } from '../utils/output';
 import { buildCommand } from './build';
 import { runDebugAdapterFactory } from '../extension';
 import { LogProcessor } from '../utils/logProcessor';
-import { parseMemoryMb, prepareDiskArgs, buildCpuArgs, buildNicArgs, buildInputArgs } from '../utils/qemuOptions';
+import { parseMemoryMb, prepareDiskArgs, buildCpuArgs, buildNicArgs, buildHostForwardArgs, buildInputArgs, buildAudioArgs, splitExtraArgs } from '../utils/qemuOptions';
 
 export async function runCommand(arch?: string) {
     const outputChannel = getOutputChannel();
@@ -64,12 +64,20 @@ export async function runCommand(arch?: string) {
     }
     cosmosArgs.push(...buildCpuArgs(props.qemu.cpuModel));
     cosmosArgs.push(...buildNicArgs(props.qemu.networkCard));
+    cosmosArgs.push(...buildHostForwardArgs(props.qemu.portForwards));
     cosmosArgs.push(...buildInputArgs(props.qemu.keyboard, props.qemu.mouse));
+    cosmosArgs.push(...buildAudioArgs(props.qemu.audio));
     try {
         cosmosArgs.push(...prepareDiskArgs(projectDir, props.qemu.disks, (m) => outputChannel.appendLine(m)));
     } catch (err: any) {
         vscode.window.showErrorMessage(`Failed to prepare disk image: ${err.message}`);
         return;
+    }
+    // Raw QEMU flags go last, after `--`: cosmos run appends whatever follows
+    // it to the QEMU command line as is.
+    const extraArgs = splitExtraArgs(props.qemu.extraArgs);
+    if (extraArgs.length > 0) {
+        cosmosArgs.push('--', ...extraArgs);
     }
 
     outputChannel.show(true);

@@ -100,10 +100,18 @@ export interface QemuConfig {
     serialMode: string;
     // QEMU NIC model exposed to the guest, or 'none' for no network card.
     networkCard: string;
+    // Host ports forwarded to the guest, each a QEMU hostfwd rule such as
+    // 'tcp::2323-:23' (the guest's port 23 at localhost:2323). They ride on
+    // the network card's user-mode backend, so they need a card.
+    portForwards: string[];
     // Keyboard device: 'ps2' (x64 chipset), 'virtio-keyboard-device' (arm64), or 'none'.
     keyboard: string;
     // Mouse device: 'ps2' (x64 chipset), 'virtio-mouse-device' (arm64), or 'none'.
     mouse: string;
+    // Audio controller: a QEMU HD Audio model ('intel-hda', 'ich9-intel-hda')
+    // or 'none'. The codec riding on it is the launcher's business, not a
+    // separate choice here.
+    audio: string;
     extraArgs: string;
     // Disk images attached to the kernel at boot. Empty by default.
     disks: DiskConfig[];
@@ -125,6 +133,7 @@ export interface ProjectProperties {
     enablePCI: boolean;
     enableStorage: boolean;
     enableFat: boolean;
+    enableAudio: boolean;
     gccFlags: string;
     packages: { name: string; version: string }[];
     qemu: QemuConfig;
@@ -139,9 +148,13 @@ export function getDefaultQemuConfig(arch: string): QemuConfig {
         networkPorts: '5555',
         serialMode: 'stdio',
         networkCard: 'none',
+        portForwards: [],
         // x64 gets PS/2 from the chipset; arm64 virt needs virtio-input devices.
         keyboard: arch === 'arm64' ? 'virtio-keyboard-device' : 'ps2',
         mouse: arch === 'arm64' ? 'virtio-mouse-device' : 'ps2',
+        // Off by default: audio is something a kernel opts into, and a project
+        // that never asked for it should launch exactly as it did before.
+        audio: 'none',
         extraArgs: '',
         disks: []
     };
@@ -178,6 +191,12 @@ export function loadQemuConfig(projectDir: string, arch: string): QemuConfig {
     const x64Mice = ['ps2', 'none', 'virtio-mouse-pci'];
     const arm64Mice = ['virtio-mouse-device', 'none'];
 
+    // Audio controllers with a kernel driver. The HD Audio driver binds over
+    // PCI, which the arm64 virt machine also has, but it has only been run on
+    // x64 — arm64 keeps the list at 'none' until that is more than a guess.
+    const x64AudioDevices = ['none', 'intel-hda', 'ich9-intel-hda'];
+    const arm64AudioDevices = ['none'];
+
     try {
         if (fs.existsSync(configPath)) {
             const content = fs.readFileSync(configPath, 'utf8');
@@ -198,6 +217,8 @@ export function loadQemuConfig(projectDir: string, arch: string): QemuConfig {
                     }));
             }
 
+            merged.portForwards = normalizePortForwards(merged.portForwards);
+
             // Validate machine type matches architecture
             if (arch === 'arm64') {
                 if (!arm64MachineTypes.includes(merged.machineType)) {
@@ -215,6 +236,9 @@ export function loadQemuConfig(projectDir: string, arch: string): QemuConfig {
                 if (!arm64Mice.includes(merged.mouse)) {
                     merged.mouse = defaults.mouse;
                 }
+                if (!arm64AudioDevices.includes(merged.audio)) {
+                    merged.audio = defaults.audio;
+                }
             } else {
                 if (!x64MachineTypes.includes(merged.machineType)) {
                     merged.machineType = defaults.machineType;
@@ -231,6 +255,9 @@ export function loadQemuConfig(projectDir: string, arch: string): QemuConfig {
                 if (!x64Mice.includes(merged.mouse)) {
                     merged.mouse = defaults.mouse;
                 }
+                if (!x64AudioDevices.includes(merged.audio)) {
+                    merged.audio = defaults.audio;
+                }
             }
 
             return merged;
@@ -238,6 +265,18 @@ export function loadQemuConfig(projectDir: string, arch: string): QemuConfig {
     } catch { } // Ignore errors parsing config file
 
     return defaults;
+}
+
+// Port forwards may be absent in older configs, or hand-written as one
+// string; normalize to a clean array of rules. A string is split on spaces
+// and commas, which no hostfwd rule contains.
+export function normalizePortForwards(value: unknown): string[] {
+    const items: unknown[] = typeof value === 'string'
+        ? value.split(/[\s,]+/)
+        : Array.isArray(value) ? value : [];
+    return items
+        .filter((r): r is string => typeof r === 'string' && r.trim() !== '')
+        .map(r => r.trim());
 }
 
 export function saveQemuConfig(projectDir: string, qemu: QemuConfig): void {
@@ -312,6 +351,7 @@ export function parseProjectProperties(csprojPath: string): ProjectProperties {
         enablePCI: getProperty('CosmosEnablePCI') !== 'false',
         enableStorage: getProperty('CosmosEnableStorage') !== 'false',
         enableFat: getProperty('CosmosEnableFat') !== 'false',
+        enableAudio: getProperty('CosmosEnableAudio') !== 'false',
         gccFlags: getProperty('GCCCompilerFlags') || '',
         packages,
         qemu: loadQemuConfig(projectDir, targetArch)
@@ -436,6 +476,12 @@ export function saveProjectProperties(csprojPath: string, props: ProjectProperti
         removeProperty('CosmosEnableFat');
     } else {
         setProperty('CosmosEnableFat', 'false');
+    }
+
+    if (props.enableAudio) {
+        removeProperty('CosmosEnableAudio');
+    } else {
+        setProperty('CosmosEnableAudio', 'false');
     }
 
     fs.writeFileSync(csprojPath, content);
