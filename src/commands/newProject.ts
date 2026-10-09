@@ -8,6 +8,22 @@ import { getBuildChannel } from '../utils/output';
 import { ProjectTreeProvider } from '../providers/projectTree';
 import { ToolsTreeProvider } from '../providers/toolsTree';
 
+// The kernel templates, one per language. Templates from before the split
+// have a single C# template, cosmos-kernel, which C# falls back to.
+const languages = [
+    { label: 'C#', template: 'cosmos-kernel-csharp', fallbackTemplate: 'cosmos-kernel', projectExtension: '.csproj' },
+    { label: 'Visual Basic', template: 'cosmos-kernel-vb', fallbackTemplate: undefined, projectExtension: '.vbproj' }
+];
+
+// The short names in the output of `dotnet new list cosmos-kernel`.
+function installedTemplates(listOutput: string): Set<string> {
+    const names = new Set<string>();
+    for (const match of listOutput.matchAll(/(?:^|\s)(cosmos-kernel(?:-[a-z]+)?)(?=\s|$)/gm)) {
+        names.add(match[1]);
+    }
+    return names;
+}
+
 export async function newProjectCommand(context: vscode.ExtensionContext, projectTreeProvider: ProjectTreeProvider, toolsTreeProvider: ToolsTreeProvider) {
     const buildChannel = getBuildChannel();
 
@@ -31,13 +47,13 @@ export async function newProjectCommand(context: vscode.ExtensionContext, projec
     }
 
     // Check if templates are installed
-    let templatesInstalled = false;
+    let templates = new Set<string>();
     try {
         const result = execWithPath('dotnet new list cosmos-kernel', { encoding: 'utf8' });
-        templatesInstalled = result.includes('cosmos-kernel');
+        templates = installedTemplates(result);
     } catch { }
 
-    if (!templatesInstalled) {
+    if (templates.size === 0) {
         const terminal = vscode.window.createTerminal('Cosmos Setup');
         terminal.show();
         terminal.sendText('dotnet new install Cosmos.Build.Templates');
@@ -63,6 +79,32 @@ export async function newProjectCommand(context: vscode.ExtensionContext, projec
     });
 
     if (!projectName) return;
+
+    // Ask for the language
+    const language = await vscode.window.showQuickPick(
+        languages.map(l => ({ label: l.label, description: l.template, language: l })),
+        {
+            placeHolder: 'Select the kernel language',
+            title: 'Language'
+        }
+    );
+
+    if (!language) return;
+
+    const template = [language.language.template, language.language.fallbackTemplate]
+        .find(name => name !== undefined && templates.has(name));
+    if (!template) {
+        const update = await vscode.window.showErrorMessage(
+            `The installed Cosmos templates have no ${language.label} template. Update them with "cosmos update", then create the project again.`,
+            'Update', 'Cancel'
+        );
+        if (update === 'Update') {
+            const terminal = vscode.window.createTerminal('Cosmos Setup');
+            terminal.show();
+            terminal.sendText('cosmos update');
+        }
+        return;
+    }
 
     // Ask for target architecture
     const arch = await vscode.window.showQuickPick(
@@ -118,6 +160,7 @@ export async function newProjectCommand(context: vscode.ExtensionContext, projec
     // Create the project
     buildChannel.show();
     buildChannel.appendLine(`Creating Cosmos kernel project: ${projectName}`);
+    buildChannel.appendLine(`Language: ${language.label}`);
     buildChannel.appendLine(`Architecture: ${arch.label}`);
     buildChannel.appendLine(`Location: ${projectPath}`);
     buildChannel.appendLine('');
@@ -130,7 +173,7 @@ export async function newProjectCommand(context: vscode.ExtensionContext, projec
 
         // Run dotnet new (use -o . when creating in current dir to avoid subdirectory)
         const outputFlag = createInCurrentDir ? '-o .' : '';
-        const cmd = `dotnet new cosmos-kernel -n ${projectName} ${outputFlag} --force`;
+        const cmd = `dotnet new ${template} -n ${projectName} ${outputFlag} --force`;
         buildChannel.appendLine(`> ${cmd}`);
 
         const result = execWithPath(cmd, {
@@ -170,12 +213,12 @@ export async function newProjectCommand(context: vscode.ExtensionContext, projec
         buildChannel.appendLine(" . . . ....\"'");
         buildChannel.appendLine(" .. . .\"'");
         buildChannel.appendLine('.');
-        // Get Cosmos.Kernel version from csproj
+        // Get Cosmos.Kernel version from the project file
         let cosmosVersion = '';
-        const csprojPath = path.join(projectPath, `${projectName}.csproj`);
-        if (fs.existsSync(csprojPath)) {
-            const csprojContent = fs.readFileSync(csprojPath, 'utf8');
-            const versionMatch = csprojContent.match(/<PackageReference\s+Include="Cosmos.Kernel"\s+Version="([^"]+)"/);
+        const projectFile = path.join(projectPath, `${projectName}${language.language.projectExtension}`);
+        if (fs.existsSync(projectFile)) {
+            const projectContent = fs.readFileSync(projectFile, 'utf8');
+            const versionMatch = projectContent.match(/<PackageReference\s+Include="Cosmos.Kernel"\s+Version="([^"]+)"/);
             if (versionMatch) {
                 cosmosVersion = versionMatch[1];
             }
